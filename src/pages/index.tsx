@@ -132,34 +132,34 @@ export default function Home() {
   const isCompleted = job?.status === "completed";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Animated background */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl animate-pulse delay-1000" />
       </div>
 
       <div className="relative z-10 container mx-auto px-4 py-16 max-w-4xl">
         {/* Header */}
         <div className="text-center mb-12 space-y-4">
           <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="p-3 bg-gradient-to-br from-purple-500 to-blue-500 rounded-2xl">
-              <Scissors className="w-8 h-8" />
+            <div className="p-3 bg-gradient-to-br from-primary to-accent rounded-2xl shadow-lg">
+              <Scissors className="w-8 h-8 text-primary-foreground" />
             </div>
           </div>
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 bg-clip-text text-transparent">
+          <h1 className="text-5xl font-bold bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent">
             YouTube Clipper
           </h1>
-          <p className="text-slate-400 text-lg">
+          <p className="text-muted-foreground text-lg">
             Download and clip YouTube videos with precision
           </p>
         </div>
 
         {/* Main Card */}
-        <Card className="bg-slate-900/50 backdrop-blur-xl border-slate-800 shadow-2xl">
+        <Card className="bg-card/80 backdrop-blur-xl border-border shadow-2xl">
           <CardHeader>
-            <CardTitle className="text-2xl text-white">Create Your Clip</CardTitle>
-            <CardDescription className="text-slate-400">
+            <CardTitle className="text-2xl">Create Your Clip</CardTitle>
+            <CardDescription>
               Enter a YouTube URL and specify the time range to clip
             </CardDescription>
           </CardHeader>
@@ -167,7 +167,7 @@ export default function Home() {
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* URL Input */}
               <div className="space-y-2">
-                <Label htmlFor="url" className="text-slate-200">YouTube URL</Label>
+                <Label htmlFor="url">YouTube URL</Label>
                 <Input
                   id="url"
                   type="text"
@@ -176,19 +176,18 @@ export default function Home() {
                   onChange={(e) => setUrl(e.target.value)}
                   disabled={isProcessing}
                   className={cn(
-                    "bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500",
-                    validationErrors.url && "border-red-500"
+                    validationErrors.url && "border-destructive"
                   )}
                 />
                 {validationErrors.url && (
-                  <p className="text-sm text-red-400">{validationErrors.url}</p>
+                  <p className="text-sm text-destructive">{validationErrors.url}</p>
                 )}
               </div>
 
               {/* Time Inputs */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="start" className="text-slate-200">Start Time (HH:MM:SS)</Label>
+                  <Label htmlFor="start">Start Time (HH:MM:SS)</Label>
                   <Input
                     id="start"
                     type="text"
@@ -197,17 +196,16 @@ export default function Home() {
                     onChange={(e) => setStartTime(e.target.value)}
                     disabled={isProcessing}
                     className={cn(
-                      "bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500",
-                      validationErrors.start && "border-red-500"
+                      validationErrors.start && "border-destructive"
                     )}
                   />
                   {validationErrors.start && (
-                    <p className="text-sm text-red-400">{validationErrors.start}</p>
+                    <p className="text-sm text-destructive">{validationErrors.start}</p>
                   )}
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="end" className="text-slate-200">End Time (HH:MM:SS)</Label>
+                  <Label htmlFor="end">End Time (HH:MM:SS)</Label>
                   <Input
                     id="end"
                     type="text"
@@ -216,12 +214,11 @@ export default function Home() {
                     onChange={(e) => setEndTime(e.target.value)}
                     disabled={isProcessing}
                     className={cn(
-                      "bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-500",
-                      validationErrors.end && "border-red-500"
+                      validationErrors.end && "border-destructive"
                     )}
                   />
                   {validationErrors.end && (
-                    <p className="text-sm text-red-400">{validationErrors.end}</p>
+                    <p className="text-sm text-destructive">{validationErrors.end}</p>
                   )}
                 </div>
               </div>
@@ -230,7 +227,7 @@ export default function Home() {
               <Button
                 type="submit"
                 disabled={isSubmitting || isProcessing}
-                className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-gradient-to-r from-primary to-accent hover:opacity-90 font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02] shadow-lg"
               >
                 {isSubmitting || isProcessing ? (
                   <>
@@ -248,27 +245,27 @@ export default function Home() {
 
             {/* Error Alert */}
             {error && (
-              <Alert className="bg-red-900/20 border-red-500/50">
-                <AlertCircle className="h-4 w-4 text-red-400" />
-                <AlertDescription className="text-red-200">{error}</AlertDescription>
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
 
             {/* Processing Status */}
             {job && (
-              <div className="space-y-4 p-6 bg-slate-800/30 rounded-lg border border-slate-700">
+              <div className="space-y-4 p-6 bg-muted/30 rounded-lg border border-border">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {isCompleted ? (
-                      <CheckCircle2 className="h-6 w-6 text-green-400" />
+                      <CheckCircle2 className="h-6 w-6 text-secondary" />
                     ) : job.status === "failed" ? (
-                      <AlertCircle className="h-6 w-6 text-red-400" />
+                      <AlertCircle className="h-6 w-6 text-destructive" />
                     ) : (
-                      <Loader2 className="h-6 w-6 text-blue-400 animate-spin" />
+                      <Loader2 className="h-6 w-6 text-accent animate-spin" />
                     )}
                     <div>
-                      <p className="font-semibold text-white capitalize">{job.status}</p>
-                      <p className="text-sm text-slate-400">
+                      <p className="font-semibold capitalize">{job.status}</p>
+                      <p className="text-sm text-muted-foreground">
                         {job.status === "downloading" && "Downloading video from YouTube..."}
                         {job.status === "clipping" && "Clipping video..."}
                         {job.status === "completed" && "Your clip is ready!"}
@@ -277,7 +274,7 @@ export default function Home() {
                       </p>
                     </div>
                   </div>
-                  <span className="text-2xl font-bold text-white">{job.progress}%</span>
+                  <span className="text-2xl font-bold">{job.progress}%</span>
                 </div>
 
                 {!isCompleted && job.status !== "failed" && (
@@ -288,7 +285,8 @@ export default function Home() {
                 {isCompleted && job.clippedFile && (
                   <Button
                     asChild
-                    className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02]"
+                    variant="secondary"
+                    className="w-full font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02] shadow-lg"
                   >
                     <a href={job.clippedFile} download>
                       <Download className="mr-2 h-5 w-5" />
@@ -310,11 +308,11 @@ export default function Home() {
           ].map((feature, i) => (
             <div
               key={i}
-              className="p-6 bg-slate-900/30 backdrop-blur-sm rounded-xl border border-slate-800 hover:border-slate-700 transition-all duration-300 hover:scale-105"
+              className="p-6 bg-card/50 backdrop-blur-sm rounded-xl border border-border hover:border-primary/50 transition-all duration-300 hover:scale-105 shadow-md"
             >
-              <feature.icon className="h-8 w-8 text-purple-400 mb-3" />
-              <h3 className="font-semibold text-white mb-2">{feature.title}</h3>
-              <p className="text-sm text-slate-400">{feature.desc}</p>
+              <feature.icon className="h-8 w-8 text-primary mb-3" />
+              <h3 className="font-semibold mb-2">{feature.title}</h3>
+              <p className="text-sm text-muted-foreground">{feature.desc}</p>
             </div>
           ))}
         </div>
