@@ -11,6 +11,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { Scissors, Download, Loader2, AlertCircle, CheckCircle2, Video } from "lucide-react";
 
+const STORAGE_KEY = "yt-clipper-jobId";
+
 export default function Home() {
   const { params, updateParams } = useQueryParams();
   
@@ -24,6 +26,15 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  
+  // Metadata state
+  const [metadata, setMetadata] = useState<{
+    title: string;
+    duration: number;
+    thumbnail: string;
+    uploader: string;
+  } | null>(null);
+  const [isFetchingMetadata, setIsFetchingMetadata] = useState(false);
 
   // Sync form with query params on mount (with validation)
   useEffect(() => {
@@ -46,6 +57,27 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Load jobId from localStorage or URL params on mount
+  useEffect(() => {
+    const urlJobId = params.jobId;
+    const storedJobId = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
+    
+    // Priority: URL params > localStorage
+    const jobId = urlJobId || storedJobId;
+    
+    if (jobId) {
+      // Sync to both URL and localStorage
+      if (!urlJobId) {
+        updateParams({ jobId });
+      }
+      if (jobId !== storedJobId) {
+        localStorage.setItem(STORAGE_KEY, jobId);
+      }
+      fetchJobStatus(jobId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const fetchJobStatus = useCallback(async (jobId: string) => {
     try {
       const res = await fetch(`/api/status/${jobId}`);
@@ -53,24 +85,52 @@ export default function Home() {
         const jobData = await res.json();
         setJob(jobData);
         
+        // Clear localStorage when job is completed or failed
+        if (jobData.status === "completed" || jobData.status === "failed") {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+        
         if (jobData.status === "failed") {
           setError(jobData.error || "Processing failed");
         }
       } else if (res.status === 404) {
         setError("Job not found or expired");
         updateParams({ jobId: undefined });
+        localStorage.removeItem(STORAGE_KEY);
       }
     } catch (err) {
       console.error("Error fetching job status:", err);
     }
   }, [updateParams]);
 
-  // Check for existing job on mount
+  // Fetch metadata when URL changes
   useEffect(() => {
-    if (params.jobId) {
-      fetchJobStatus(params.jobId);
-    }
-  }, [params.jobId, fetchJobStatus]);
+    const fetchMetadata = async () => {
+      if (!url || validationErrors.url) {
+        setMetadata(null);
+        return;
+      }
+
+      setIsFetchingMetadata(true);
+      try {
+        const res = await fetch(`/api/metadata?url=${encodeURIComponent(url)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setMetadata(data);
+        } else {
+          setMetadata(null);
+        }
+      } catch (err) {
+        console.error("Error fetching metadata:", err);
+        setMetadata(null);
+      } finally {
+        setIsFetchingMetadata(false);
+      }
+    };
+
+    const timeoutId = setTimeout(fetchMetadata, 1000); // Debounce
+    return () => clearTimeout(timeoutId);
+  }, [url, validationErrors.url]);
 
   // Poll job status
   useEffect(() => {

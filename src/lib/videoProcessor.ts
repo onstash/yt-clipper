@@ -112,6 +112,58 @@ function findExistingVideo(videoId: string): string | null {
 }
 
 /**
+ * Fetch video metadata using yt-dlp (without downloading)
+ */
+export async function fetchVideoMetadata(url: string): Promise<{
+  title: string;
+  duration: number;
+  thumbnail: string;
+  uploader: string;
+} | null> {
+  return new Promise((resolve) => {
+    const ytDlp = spawn("yt-dlp", [
+      "--dump-json",
+      "--skip-download",
+      url,
+    ]);
+
+    let jsonData = "";
+
+    ytDlp.stdout.on("data", (data) => {
+      jsonData += data.toString();
+    });
+
+    ytDlp.stderr.on("data", (data) => {
+      console.error(`yt-dlp metadata error: ${data}`);
+    });
+
+    ytDlp.on("close", (code) => {
+      if (code === 0 && jsonData) {
+        try {
+          const metadata = JSON.parse(jsonData);
+          resolve({
+            title: metadata.title || "Unknown",
+            duration: metadata.duration || 0,
+            thumbnail: metadata.thumbnail || "",
+            uploader: metadata.uploader || metadata.channel || "Unknown",
+          });
+        } catch (err) {
+          console.error("Error parsing metadata JSON:", err);
+          resolve(null);
+        }
+      } else {
+        resolve(null);
+      }
+    });
+
+    ytDlp.on("error", (error) => {
+      console.error("yt-dlp metadata fetch error:", error);
+      resolve(null);
+    });
+  });
+}
+
+/**
  * Download video using yt-dlp
  */
 async function downloadVideo(jobId: string, url: string): Promise<string> {
