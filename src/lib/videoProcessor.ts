@@ -104,7 +104,12 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
       "mp4",
       "--progress",
       url,
-    ]);
+    ], {
+      env: {
+        ...process.env,
+        PATH: process.env.PATH || "",
+      }
+    });
 
     let downloadedFile = "";
 

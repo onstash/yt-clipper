@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "dev": "nvm use 25 && next dev",
+    "build": "nvm use 25 && next build",
+    "start": "nvm use 25 && next start"
+  },
+  "engines": {
+    "node": ">=25.0.0"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.8",
