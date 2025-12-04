@@ -28,7 +28,7 @@ export async function checkDependencies(): Promise<{
   const checkCommand = (cmd: string): Promise<boolean> => {
     return new Promise((resolve) => {
       const process = spawn("which", [cmd]);
-      process.on("close", (code) => resolve(code === 0));
+      process.on("close", (code: number | null) => resolve(code === 0));
     });
   };
 
@@ -129,18 +129,24 @@ export async function fetchVideoMetadata(url: string): Promise<{
 
     let jsonData = "";
 
-    ytDlp.stdout.on("data", (data) => {
+    ytDlp.stdout.on("data", (data: Buffer) => {
       jsonData += data.toString();
     });
 
-    ytDlp.stderr.on("data", (data) => {
+    ytDlp.stderr.on("data", (data: Buffer) => {
       console.error(`yt-dlp metadata error: ${data}`);
     });
 
-    ytDlp.on("close", (code) => {
+    ytDlp.on("close", (code: number | null) => {
       if (code === 0 && jsonData) {
         try {
-          const metadata = JSON.parse(jsonData);
+          const metadata = JSON.parse(jsonData) as {
+            title?: string;
+            duration?: number;
+            thumbnail?: string;
+            uploader?: string;
+            channel?: string;
+          };
           resolve({
             title: metadata.title || "Unknown",
             duration: metadata.duration || 0,
@@ -156,9 +162,9 @@ export async function fetchVideoMetadata(url: string): Promise<{
       }
     });
 
-    ytDlp.on("error", (error) => {
-      console.error("yt-dlp metadata fetch error:", error);
-      resolve(null);
+    ytDlp.on("error", (error: Error) => {
+      console.error("yt-dlp spawn error:", error);
+      reject(new Error(`Failed to spawn yt-dlp: ${error.message}`));
     });
   });
 }
@@ -205,10 +211,10 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
 
     let downloadedFile = "";
 
-    ytDlp.stdout.on("data", (data) => {
+    ytDlp.stdout.on("data", (data: Buffer) => {
       const output = data.toString();
       console.log(`yt-dlp: ${output}`);
-
+      updateJobStatus(jobId, "downloading", { progress: 25 });
       // Parse progress
       const progressMatch = output.match(/(\d+\.\d+)%/);
       if (progressMatch) {
@@ -233,20 +239,20 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
       }
     });
 
-    ytDlp.stderr.on("data", (data) => {
+    ytDlp.stderr.on("data", (data: Buffer) => {
       console.error(`yt-dlp error: ${data}`);
     });
 
-    ytDlp.on("close", async (code) => {
+    ytDlp.on("close", async (code: number | null) => {
       if (code === 0) {
         // If we didn't capture the filename, try to find it
         if (!downloadedFile) {
           const files = fs.readdirSync(DOWNLOADS_DIR);
-          const videoFiles = files.filter((f) =>
+          const foundFile = files.find((f: string) =>
             f.startsWith(`${videoId}.`)
           );
-          if (videoFiles.length > 0) {
-            downloadedFile = path.join(DOWNLOADS_DIR, videoFiles[0]);
+          if (foundFile) {
+            downloadedFile = path.join(DOWNLOADS_DIR, foundFile);
           }
         }
 
@@ -260,7 +266,7 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
       }
     });
 
-    ytDlp.on("error", (error) => {
+    ytDlp.on("error", (error: Error) => {
       reject(error);
     });
   });
@@ -317,11 +323,11 @@ async function clipVideo(
       outputFile,
     ]);
 
-    ffmpeg.stdout.on("data", (data) => {
+    ffmpeg.stdout.on("data", (data: Buffer) => {
       console.log(`ffmpeg: ${data}`);
     });
 
-    ffmpeg.stderr.on("data", (data) => {
+    ffmpeg.stderr.on("data", (data: Buffer) => {
       const output = data.toString();
       console.log(`ffmpeg: ${output}`);
 
@@ -337,15 +343,19 @@ async function clipVideo(
       }
     });
 
-    ffmpeg.on("close", (code) => {
-      if (code === 0 && fs.existsSync(outputFile)) {
-        resolve(outputFile);
+    ffmpeg.on("close", (code: number | null) => {
+      if (code === 0) {
+        if (fs.existsSync(outputFile)) {
+          console.log(`Clip created: ${outputFile}`);
+          resolve(outputFile);
+        } else {
+          reject(new Error("ffmpeg completed but clip file not found"));
+        }
       } else {
         reject(new Error(`ffmpeg exited with code ${code}`));
       }
     });
 
-    ffmpeg.on("error", (error) => {
       reject(error);
     });
   });

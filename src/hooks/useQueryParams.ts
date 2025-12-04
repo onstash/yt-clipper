@@ -30,8 +30,8 @@ export function useQueryParams(): UseQueryParamsReturn {
   // Update query params without page reload
   const updateParams = useCallback(
     (newParams: Partial<QueryParams>) => {
-      const updatedQuery: Record<string, any> = {
-        ...router.query,
+      const updatedQuery: Record<string, string | undefined> = {
+        ...router.query as Record<string, string>,
         ...newParams,
       };
 

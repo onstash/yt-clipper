@@ -49,7 +49,7 @@ export function secondsToTime(totalSeconds: number): string {
  */
 export function extractVideoIdFromUrl(url: string): string | null {
   const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([\ w-]{11})/,
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/)([\w-]{11})/,
   ];
   
   for (const pattern of patterns) {

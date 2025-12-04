@@ -6,7 +6,7 @@ import { Job } from "@/lib/types";
 
 type ResponseData =
   | { jobId: string; job: Job }
-  | { error: string; details?: any };
+  | { error: string; details?: unknown };
 
 export default async function handler(
   req: NextApiRequest,

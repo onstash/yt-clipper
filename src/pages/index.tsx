@@ -382,17 +382,19 @@ export default function Home() {
                 <CardContent className="pt-6">
                   <div className="flex items-start gap-4">
                     {metadata.thumbnail && (
-                      <img 
-                        src={metadata.thumbnail} 
-                        alt={metadata.title}
-                        className="w-32 h-24 object-cover rounded-lg"
-                      />
+                      <div className="flex-shrink-0">
+                        <img 
+                          src={metadata.thumbnail} 
+                          alt={metadata.title}
+                          className="w-40 h-[90px] object-cover rounded-lg shadow-md"
+                        />
+                      </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-foreground truncate">
+                      <h3 className="font-semibold text-foreground line-clamp-2 mb-1">
                         {metadata.title}
                       </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
+                      <p className="text-sm text-muted-foreground">
                         {metadata.uploader}
                       </p>
                       <p className="text-sm text-muted-foreground mt-1">
