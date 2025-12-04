@@ -42,5 +42,8 @@ next-env.d.ts
 
 # downloads
 /jobs/*.json
-/downloads/
-/clips/
+/downloads/*.mp4
+/downloads/*.mkv
+/downloads/*.part
+/clips/*.mp4
+/clips/*.mkv
