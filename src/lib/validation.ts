@@ -1,16 +1,33 @@
 import { z } from "zod";
 
 // Validates format AND logical time values
-export const timeRegex = /^([0-1]\d|2[0-3]):([0-5]\d):([0-5]\d)$/;
+// Accepts both mm:ss and hh:mm:ss formats
+export const timeRegex = /^(?:([0-1]?\d|2[0-3]):)?([0-5]?\d):([0-5]\d)$/;
 
 // Matches all common YouTube URL formats with optional query parameters
 export const youtubeUrlRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/)|youtu\.be\/)[\w-]{11}(\?.*)?$/;
 
 /**
+ * Normalize time string to HH:MM:SS format
+ * Accepts: "26" (ss), "1:30" (mm:ss), "01:30" (mm:ss), "1:30:45" (hh:mm:ss)
+ */
+export function normalizeTime(time: string): string {
+  const match = time.match(timeRegex);
+  if (!match) return time;
+  
+  const hours = match[1] || "00";
+  const minutes = match[2];
+  const seconds = match[3];
+  
+  return `${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:${seconds.padStart(2, '0')}`;
+}
+
+/**
  * Converts time string in HH:MM:SS format to seconds
  */
 export function timeToSeconds(time: string): number {
-  const [hours, minutes, seconds] = time.split(':').map(Number);
+  const normalized = normalizeTime(time);
+  const [hours, minutes, seconds] = normalized.split(':').map(Number);
   return hours * 3600 + minutes * 60 + seconds;
 }
 
@@ -64,8 +81,12 @@ export function extractTimestampFromUrl(url: string): number | null {
 
 export const inputSchema = z.object({
   url: z.string().regex(youtubeUrlRegex, "Must be a valid YouTube URL"),
-  start: z.string().regex(timeRegex, "Start time must be hh:mm:ss"),
-  end: z.string().regex(timeRegex, "End time must be hh:mm:ss")
+  start: z.string()
+    .regex(timeRegex, "Start time must be mm:ss or hh:mm:ss")
+    .transform(normalizeTime),
+  end: z.string()
+    .regex(timeRegex, "End time must be mm:ss or hh:mm:ss")
+    .transform(normalizeTime)
 }).refine(
   (data) => timeToSeconds(data.end) > timeToSeconds(data.start),
   {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQueryParams } from "@/hooks/useQueryParams";
-import { inputSchema } from "@/lib/validation";
+import { inputSchema, extractVideoIdFromUrl, extractTimestampFromUrl, secondsToTime } from "@/lib/validation";
 import { Job } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,13 @@ export default function Home() {
   const { params, updateParams } = useQueryParams();
   
   // Form state
-  const [url, setUrl] = useState(params.url || "");
+  const [url, setUrl] = useState(() => {
+    // Reconstruct URL from videoId if present
+    if (params.v) {
+      return `https://www.youtube.com/watch?v=${params.v}`;
+    }
+    return "";
+  });
   const [startTime, setStartTime] = useState(params.start || "");
   const [endTime, setEndTime] = useState(params.end || "");
   
@@ -38,20 +44,21 @@ export default function Home() {
 
   // Sync form with query params on mount (with validation)
   useEffect(() => {
-    if (params.url || params.start || params.end) {
+    if (params.v || params.start || params.end) {
+      const reconstructedUrl = params.v ? `https://www.youtube.com/watch?v=${params.v}` : "";
       const result = inputSchema.safeParse({
-        url: params.url || "",
+        url: reconstructedUrl,
         start: params.start || "",
         end: params.end || ""
       });
       
       if (result.success) {
-        if (params.url) setUrl(params.url);
+        if (params.v && !url) setUrl(reconstructedUrl);
         if (params.start) setStartTime(params.start);
         if (params.end) setEndTime(params.end);
       } else {
         // Invalid params, clear them
-        updateParams({ url: undefined, start: undefined, end: undefined });
+        updateParams({ v: undefined, start: undefined, end: undefined });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,14 +152,15 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [job, fetchJobStatus]);
 
-  // Update query params when form changes
+  // Update query params when form changes (use videoId instead of full URL)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      updateParams({ url, start: startTime, end: endTime });
+      const videoId = url ? extractVideoIdFromUrl(url) : undefined;
+      updateParams({ v: videoId || undefined, start: startTime, end: endTime });
     }, 500);
 
     return () => clearTimeout(timeoutId);
-  }, [url, startTime, endTime, updateParams]); // Added updateParams to dependencies
+  }, [url, startTime, endTime, updateParams]);
 
   const validateForm = (): boolean => {
     const result = inputSchema.safeParse({ url, start: startTime, end: endTime });
@@ -170,6 +178,17 @@ export default function Home() {
     setValidationErrors({});
     return true;
   };
+
+  // Extract timestamp from URL and update start time
+  useEffect(() => {
+    if (!url) return;
+    
+    const timestamp = extractTimestampFromUrl(url);
+    if (timestamp !== null && !startTime) {
+      const timeString = secondsToTime(timestamp);
+      setStartTime(timeString);
+    }
+  }, [url, startTime]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -288,11 +307,11 @@ export default function Home() {
               {/* Time Inputs */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="start">Start Time (HH:MM:SS)</Label>
+                  <Label htmlFor="start">Start Time (mm:ss or hh:mm:ss)</Label>
                   <Input
                     id="start"
                     type="text"
-                    placeholder="00:00:30"
+                    placeholder="00:30 or 00:00:30"
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
                     disabled={isProcessing}
@@ -306,11 +325,11 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="end">End Time (HH:MM:SS)</Label>
+                  <Label htmlFor="end">End Time (mm:ss or hh:mm:ss)</Label>
                   <Input
                     id="end"
                     type="text"
-                    placeholder="00:01:30"
+                    placeholder="01:30 or 00:01:30"
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
                     disabled={isProcessing}

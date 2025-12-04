@@ -1,9 +1,8 @@
 import { useRouter } from "next/router";
-import { useEffect, useCallback } from "react";
-import { inputSchema } from "@/lib/validation";
+import { useCallback } from "react";
 
 interface QueryParams {
-  url?: string;
+  v?: string;      // videoId instead of full URL
   start?: string;
   end?: string;
   jobId?: string;
@@ -12,8 +11,6 @@ interface QueryParams {
 interface UseQueryParamsReturn {
   params: QueryParams;
   updateParams: (newParams: Partial<QueryParams>) => void;
-  isValid: boolean;
-  validationError: string | null;
 }
 
 /**
@@ -24,37 +21,11 @@ export function useQueryParams(): UseQueryParamsReturn {
 
   // Parse current query params
   const params: QueryParams = {
-    url: router.query.url as string | undefined,
+    v: router.query.v as string | undefined,
     start: router.query.start as string | undefined,
     end: router.query.end as string | undefined,
     jobId: router.query.jobId as string | undefined,
   };
-
-  // Validate params (excluding jobId)
-  const validateParams = useCallback(() => {
-    if (!params.url && !params.start && !params.end) {
-      return { isValid: true, error: null }; // Empty is valid
-    }
-
-    if (!params.url || !params.start || !params.end) {
-      return { isValid: false, error: "All fields are required" };
-    }
-
-    const result = inputSchema.safeParse({
-      url: params.url,
-      start: params.start,
-      end: params.end,
-    });
-
-    if (!result.success) {
-      const firstError = result.error.issues[0];
-      return { isValid: false, error: firstError.message };
-    }
-
-    return { isValid: true, error: null };
-  }, [params.url, params.start, params.end]);
-
-  const validation = validateParams();
 
   // Update query params without page reload
   const updateParams = useCallback(
@@ -86,7 +57,5 @@ export function useQueryParams(): UseQueryParamsReturn {
   return {
     params,
     updateParams,
-    isValid: validation.isValid,
-    validationError: validation.error,
   };
 }
