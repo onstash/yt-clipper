@@ -324,25 +324,66 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Submit Button */}
-              <Button
-                type="submit"
-                disabled={isSubmitting || isProcessing}
-                className="w-full bg-gradient-to-r from-primary to-accent hover:opacity-90 font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02] shadow-lg"
-              >
-                {isSubmitting || isProcessing ? (
-                  <>
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <Scissors className="mr-2 h-5 w-5" />
-                    Clip Video
-                  </>
+              {/* Submit/Cancel Buttons */}
+              <div className="flex gap-3">
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || isProcessing}
+                  className="flex-1 bg-gradient-to-r from-primary to-accent hover:opacity-90 font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02] shadow-lg"
+                >
+                  {isSubmitting || isProcessing ? (
+                    <>
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Scissors className="mr-2 h-5 w-5" />
+                      Clip Video
+                    </>
+                  )}
+                </Button>
+                
+                {isProcessing && (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleCancelJob}
+                    className="px-6 py-6"
+                  >
+                    Cancel
+                  </Button>
                 )}
-              </Button>
+              </div>
             </form>
+
+            {/* Video Metadata */}
+            {metadata && !isProcessing && (
+              <Card className="bg-card/50 backdrop-blur-sm border-border/50">
+                <CardContent className="pt-6">
+                  <div className="flex items-start gap-4">
+                    {metadata.thumbnail && (
+                      <img 
+                        src={metadata.thumbnail} 
+                        alt={metadata.title}
+                        className="w-32 h-24 object-cover rounded-lg"
+                      />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground truncate">
+                        {metadata.title}
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {metadata.uploader}
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Duration: {Math.floor(metadata.duration / 60)}:{String(metadata.duration % 60).padStart(2, '0')}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Error Alert */}
             {error && (
