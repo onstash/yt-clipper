@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQueryParams } from "@/hooks/useQueryParams";
 import { inputSchema } from "@/lib/validation";
 import { Job } from "@/lib/types";
@@ -25,43 +25,28 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
-  // Sync form with query params on mount
+  // Sync form with query params on mount (with validation)
   useEffect(() => {
-    if (params.url) setUrl(params.url);
-    if (params.start) setStartTime(params.start);
-    if (params.end) setEndTime(params.end);
+    if (params.url || params.start || params.end) {
+      const result = inputSchema.safeParse({
+        url: params.url || "",
+        start: params.start || "",
+        end: params.end || ""
+      });
+      
+      if (result.success) {
+        if (params.url) setUrl(params.url);
+        if (params.start) setStartTime(params.start);
+        if (params.end) setEndTime(params.end);
+      } else {
+        // Invalid params, clear them
+        updateParams({ url: undefined, start: undefined, end: undefined });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Check for existing job on mount
-  useEffect(() => {
-    if (params.jobId) {
-      fetchJobStatus(params.jobId);
-    }
-  }, [params.jobId]);
-
-  // Poll job status
-  useEffect(() => {
-    if (!job || job.status === "completed" || job.status === "failed") {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      fetchJobStatus(job.id);
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [job]);
-
-  // Update query params when form changes
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      updateParams({ url, start: startTime, end: endTime });
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [url, startTime, endTime]);
-
-  const fetchJobStatus = async (jobId: string) => {
+  const fetchJobStatus = useCallback(async (jobId: string) => {
     try {
       const res = await fetch(`/api/status/${jobId}`);
       if (res.ok) {
@@ -78,7 +63,36 @@ export default function Home() {
     } catch (err) {
       console.error("Error fetching job status:", err);
     }
-  };
+  }, [updateParams]);
+
+  // Check for existing job on mount
+  useEffect(() => {
+    if (params.jobId) {
+      fetchJobStatus(params.jobId);
+    }
+  }, [params.jobId, fetchJobStatus]);
+
+  // Poll job status
+  useEffect(() => {
+    if (!job || job.status === "completed" || job.status === "failed") {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      fetchJobStatus(job.id);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [job, fetchJobStatus]);
+
+  // Update query params when form changes
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      updateParams({ url, start: startTime, end: endTime });
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [url, startTime, endTime, updateParams]); // Added updateParams to dependencies
 
   const validateForm = (): boolean => {
     const result = inputSchema.safeParse({ url, start: startTime, end: endTime });

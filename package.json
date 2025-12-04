@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "nvm use 25 && next dev",
-    "build": "nvm use 25 && next build",
-    "start": "nvm use 25 && next start"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "engines": {
     "node": ">=25.0.0"

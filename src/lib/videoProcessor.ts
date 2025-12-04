@@ -88,10 +88,24 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
   updateJobStatus(jobId, "downloading", { progress: 0 });
 
   const videoId = extractVideoId(url);
-  const timestamp = Date.now();
+  if (!videoId) {
+    throw new Error("Could not extract video ID from URL");
+  }
+
+  // Check if video already exists
+  const existingFiles = fs.readdirSync(DOWNLOADS_DIR);
+  const existingVideo = existingFiles.find((f) => f.startsWith(`${videoId}.`));
+  
+  if (existingVideo) {
+    const existingPath = path.join(DOWNLOADS_DIR, existingVideo);
+    console.log(`Video already downloaded: ${existingPath}`);
+    updateJobStatus(jobId, "downloading", { progress: 50 });
+    return existingPath;
+  }
+
   const outputTemplate = path.join(
     DOWNLOADS_DIR,
-    `${videoId}_${timestamp}.%(ext)s`
+    `${videoId}.%(ext)s`
   );
 
   return new Promise((resolve, reject) => {
@@ -151,7 +165,7 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
         if (!downloadedFile) {
           const files = fs.readdirSync(DOWNLOADS_DIR);
           const videoFiles = files.filter((f) =>
-            f.startsWith(`${videoId}_${timestamp}`)
+            f.startsWith(`${videoId}.`)
           );
           if (videoFiles.length > 0) {
             downloadedFile = path.join(DOWNLOADS_DIR, videoFiles[0]);
@@ -187,7 +201,18 @@ async function clipVideo(
 
   const ext = path.extname(inputFile);
   const basename = path.basename(inputFile, ext);
-  const outputFile = path.join(CLIPS_DIR, `${basename}_clip${ext}`);
+  
+  // Sanitize times for filename (replace : with -)
+  const startSafe = startTime.replace(/:/g, "-");
+  const endSafe = endTime.replace(/:/g, "-");
+  const outputFile = path.join(CLIPS_DIR, `${basename}_${startSafe}_${endSafe}${ext}`);
+
+  // Check if clip already exists
+  if (fs.existsSync(outputFile)) {
+    console.log(`Clip already exists: ${outputFile}`);
+    updateJobStatus(jobId, "clipping", { progress: 100 });
+    return outputFile;
+  }
 
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
