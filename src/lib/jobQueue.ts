@@ -94,6 +94,25 @@ export function updateJobStatus(
 }
 
 /**
+ * Delete job file (cleanup after completion/failure)
+ */
+export function deleteJob(jobId: string): boolean {
+  const jobPath = path.join(JOBS_DIR, `${jobId}.json`);
+  
+  try {
+    if (fs.existsSync(jobPath)) {
+      fs.unlinkSync(jobPath);
+      console.log(`Deleted job file: ${jobId}`);
+      return true;
+    }
+  } catch (error) {
+    console.error(`Error deleting job ${jobId}:`, error);
+  }
+  
+  return false;
+}
+
+/**
  * Delete old jobs (older than 24 hours)
  */
 export function cleanupOldJobs(): void {

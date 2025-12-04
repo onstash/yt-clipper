@@ -1,11 +1,14 @@
 import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
-import { getJob, saveJob, updateJobStatus } from "./jobQueue";
+import { getJob, saveJob, updateJobStatus, deleteJob } from "./jobQueue";
 import { extractVideoId } from "./utils";
 
 const DOWNLOADS_DIR = path.join(process.cwd(), "public", "downloads");
 const CLIPS_DIR = path.join(process.cwd(), "public", "clips");
+
+// Video formats to check for existing downloads
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.flv', '.avi', '.mov', '.3gp', '.m4v']);
 
 // Ensure directories exist
 if (!fs.existsSync(DOWNLOADS_DIR)) {
@@ -73,12 +76,39 @@ export async function processVideo(jobId: string): Promise<void> {
       clippedFile: `/clips/${path.basename(clippedFile)}`,
       progress: 100,
     });
+    
+    // Cleanup job file after successful completion
+    setTimeout(() => deleteJob(jobId), 5000); // 5 second delay for client to fetch final status
+    
   } catch (error) {
     console.error(`Error processing job ${jobId}:`, error);
     updateJobStatus(jobId, "failed", {
       error: error instanceof Error ? error.message : "Unknown error",
     });
+    
+    // Cleanup job file after failure
+    setTimeout(() => deleteJob(jobId), 30000); // 30 second delay for error review
   }
+}
+
+/**
+ * Find existing video file by video ID (checks all common formats)
+ */
+function findExistingVideo(videoId: string): string | null {
+  try {
+    const files = fs.readdirSync(DOWNLOADS_DIR);
+    
+    for (const ext of VIDEO_EXTENSIONS) {
+      const filename = `${videoId}${ext}`;
+      if (files.includes(filename)) {
+        return path.join(DOWNLOADS_DIR, filename);
+      }
+    }
+  } catch (err) {
+    console.error('Error reading downloads directory:', err);
+  }
+  
+  return null;
 }
 
 /**
@@ -92,15 +122,13 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
     throw new Error("Could not extract video ID from URL");
   }
 
-  // Check if video already exists (any format)
-  const existingFiles = fs.readdirSync(DOWNLOADS_DIR);
-  const existingVideo = existingFiles.find((f) => f.startsWith(`${videoId}.`));
+  // Check if video already exists in any format
+  const existingVideo = findExistingVideo(videoId);
   
   if (existingVideo) {
-    const existingPath = path.join(DOWNLOADS_DIR, existingVideo);
-    console.log(`Video already downloaded: ${existingPath}`);
+    console.log(`Video already downloaded: ${existingVideo}`);
     updateJobStatus(jobId, "downloading", { progress: 50 });
-    return existingPath;
+    return existingVideo;
   }
 
   const outputTemplate = path.join(

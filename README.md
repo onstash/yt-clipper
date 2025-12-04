@@ -1,40 +1,188 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+# YouTube Clipper
 
-## Getting Started
+A high-performance web application for downloading and clipping YouTube videos with precision. Built with Next.js, featuring intelligent file caching and high-quality MP4 output.
 
-First, run the development server:
+![Architecture Diagram](/.gemini/antigravity/brain/756b0898-9f4f-4750-ba1d-1269a34fe5c4/architecture_diagram_1764861386824.png)
+
+## ✨ Features
+
+- **Precise Clipping** - Frame-accurate video clips with custom start/end times
+- **High Quality Output** - Near-lossless H.264 encoding (CRF 18) with 320kbps AAC audio
+- **Smart Caching** - Reuses downloaded videos and existing clips to save time and bandwidth
+- **Any Format Support** - Handles WebM, MKV, FLV, AVI, MOV, and more
+- **Real-time Progress** - Live progress tracking with status updates
+- **URL Persistence** - Form state synced with URL query parameters
+- **Page Refresh Safe** - Resume processing after page refresh
+
+## 🏗️ Architecture
+
+### Data Flow
+
+1. **User Input** → Form submission with YouTube URL and time range
+2. **Job Creation** → API creates job and persists to file system
+3. **Video Download** → yt-dlp downloads video in native format (cached)
+4. **Clip & Convert** → ffmpeg clips video and outputs high-quality MP4
+5. **Status Polling** → Real-time progress updates via API
+6. **Download** → User downloads the clipped MP4 file
+
+### Key Components
+
+- **Frontend**: Next.js (Pages Router), React, shadcn UI, Tailwind CSS
+- **Backend**: Next.js API Routes, Node.js
+- **Video Processing**: yt-dlp (download), ffmpeg (clip & convert)
+- **Job Queue**: File-based persistence (`data/jobs/*.json`)
+- **Storage**: `public/downloads/` (full videos), `public/clips/` (clips)
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Node.js 25+
+- yt-dlp
+- ffmpeg
+
+### Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+# Install dependencies
+pnpm install
+
+# Install video processing tools (macOS)
+brew install yt-dlp ffmpeg
+
+# Start development server
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit `http://localhost:3000`
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+### Production Build
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+```bash
+pnpm build
+pnpm start
+```
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
+## 📁 Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+yt-clipper/
+├── src/
+│   ├── components/ui/      # shadcn UI components
+│   ├── hooks/              # Custom React hooks
+│   ├── lib/
+│   │   ├── validation.ts   # Zod schemas
+│   │   ├── jobQueue.ts     # File-based job queue
+│   │   ├── videoProcessor.ts # yt-dlp & ffmpeg integration
+│   │   └── types.ts        # TypeScript types
+│   ├── pages/
+│   │   ├── index.tsx       # Landing page
+│   │   └── api/
+│   │       ├── process.ts  # POST /api/process
+│   │       └── status/[jobId].ts # GET /api/status/:jobId
+│   └── styles/
+│       └── globals.css     # Global styles & theme
+├── public/
+│   ├── downloads/          # Downloaded videos (cached)
+│   └── clips/              # Clipped MP4 files
+└── data/
+    └── jobs/               # Job status JSON files
+```
 
-## Learn More
+## 🎯 Usage
 
-To learn more about Next.js, take a look at the following resources:
+1. **Enter YouTube URL** - Paste any YouTube video URL
+2. **Set Time Range** - Specify start and end times (HH:MM:SS format)
+3. **Click "Clip Video"** - Processing begins immediately
+4. **Monitor Progress** - Real-time progress bar shows download and clipping status
+5. **Download Clip** - Download button appears when processing completes
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
+### Example
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+URL: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+Start Time: 00:00:10
+End Time: 00:00:30
+```
 
-## Deploy on Vercel
+Creates: `dQw4w9WgXcQ_00-00-10_00-00-30.mp4` (20-second clip)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## ⚙️ Configuration
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+### Video Quality Settings
+
+Edit `src/lib/videoProcessor.ts`:
+
+```typescript
+// ffmpeg encoding settings
+"-preset", "veryslow",  // Quality preset (ultrafast to veryslow)
+"-crf", "18",           // Quality (0-51, lower = better)
+"-b:a", "320k",         // Audio bitrate
+```
+
+### File Caching
+
+- **Downloads**: Same video ID reuses existing download
+- **Clips**: Same video + time range reuses existing clip
+- Files stored with predictable names for efficient caching
+
+## 🔧 Technical Details
+
+### Validation
+
+- **Zod schemas** for type-safe input validation
+- **Real-time validation** with error messages
+- **Time range validation** ensures end time > start time
+
+### Job Queue
+
+- **File-based persistence** for reliability
+- **Survives page refreshes** and server restarts
+- **Status tracking**: pending → downloading → clipping → completed/failed
+
+### Video Processing
+
+**Download Phase:**
+```bash
+yt-dlp -f bestvideo+bestaudio -o "videoId.%(ext)s" [URL]
+```
+
+**Clip Phase:**
+```bash
+ffmpeg -ss [start] -i [input] -to [end] \
+  -c:v libx264 -preset veryslow -crf 18 \
+  -c:a aac -b:a 320k -movflags +faststart \
+  [output.mp4]
+```
+
+### Performance Optimizations
+
+- **Single encoding pass** - Clip directly from source to MP4
+- **Fast seeking** - `-ss` before `-i` for instant seek
+- **Streaming-optimized** - `+faststart` flag for web playback
+- **Smart caching** - Avoids redundant downloads and conversions
+
+## 🛠️ Development
+
+### Type Checking
+
+```bash
+pnpm tsc --noEmit
+```
+
+### Build
+
+```bash
+pnpm build
+```
+
+## 📝 License
+
+MIT
+
+## 🙏 Acknowledgments
+
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - YouTube video downloader
+- [ffmpeg](https://ffmpeg.org/) - Video processing
+- [Next.js](https://nextjs.org/) - React framework
+- [shadcn/ui](https://ui.shadcn.com/) - UI components
