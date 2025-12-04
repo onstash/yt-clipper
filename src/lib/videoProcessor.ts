@@ -81,107 +81,6 @@ export async function processVideo(jobId: string): Promise<void> {
   }
 }
 
-// Video formats that need conversion to MP4
-const FORMATS_TO_CONVERT = new Set(['.webm', '.mkv', '.flv', '.avi', '.mov', '.3gp', '.m4v']);
-
-/**
- * Check if a video file needs conversion to MP4
- */
-function needsConversion(filename: string): boolean {
-  const ext = path.extname(filename).toLowerCase();
-  return FORMATS_TO_CONVERT.has(ext);
-}
-
-/**
- * Convert any video format to MP4 using ffmpeg
- */
-async function convertToMp4(inputFile: string, jobId?: string): Promise<string> {
-  const ext = path.extname(inputFile);
-  const outputFile = inputFile.replace(new RegExp(`${ext}$`, 'i'), '.mp4');
-  
-  // If already MP4, return as is
-  if (!needsConversion(inputFile)) {
-    return inputFile;
-  }
-
-  // If MP4 version already exists, return it
-  if (fs.existsSync(outputFile)) {
-    console.log(`MP4 version already exists: ${outputFile}`);
-    return outputFile;
-  }
-
-  console.log(`Converting ${path.basename(inputFile)} to MP4...`);
-
-  return new Promise((resolve, reject) => {
-    const ffmpeg = spawn("ffmpeg", [
-      "-i",
-      inputFile,
-      "-c:v",
-      "libx264",      // H.264 video codec
-      "-preset",
-      "medium",       // Encoding speed/quality balance
-      "-crf",
-      "23",           // Quality (18-28, lower = better quality)
-      "-c:a",
-      "aac",          // AAC audio codec
-      "-b:a",
-      "192k",         // Audio bitrate
-      "-movflags",
-      "+faststart",   // Enable streaming
-      "-y",           // Overwrite output file
-      outputFile,
-    ]);
-
-    let hasError = false;
-
-    ffmpeg.stdout.on("data", (data) => {
-      console.log(`ffmpeg convert: ${data}`);
-    });
-
-    ffmpeg.stderr.on("data", (data) => {
-      const output = data.toString();
-      console.log(`ffmpeg convert: ${output}`);
-      
-      // Check for errors
-      if (output.toLowerCase().includes('error')) {
-        hasError = true;
-      }
-      
-      // Update progress if jobId provided
-      if (jobId) {
-        const timeMatch = output.match(/time=(\d+):(\d+):(\d+)/);
-        if (timeMatch) {
-          const job = getJob(jobId);
-          if (job && job.status === 'downloading') {
-            // Progress 25-50% for conversion during download
-            job.progress = Math.min(50, 25 + Math.floor(Math.random() * 25));
-            saveJob(job);
-          }
-        }
-      }
-    });
-
-    ffmpeg.on("close", (code) => {
-      if (code === 0 && fs.existsSync(outputFile) && !hasError) {
-        // Delete original file to save space
-        try {
-          fs.unlinkSync(inputFile);
-          console.log(`Deleted original file: ${path.basename(inputFile)}`);
-        } catch (err) {
-          console.error(`Could not delete original file: ${err}`);
-        }
-        resolve(outputFile);
-      } else {
-        reject(new Error(`ffmpeg conversion exited with code ${code}`));
-      }
-    });
-
-    ffmpeg.on("error", (error) => {
-      reject(error);
-    });
-  });
-}
-
 /**
  * Download video using yt-dlp
  */
@@ -193,7 +92,7 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
     throw new Error("Could not extract video ID from URL");
   }
 
-  // Check if video already exists
+  // Check if video already exists (any format)
   const existingFiles = fs.readdirSync(DOWNLOADS_DIR);
   const existingVideo = existingFiles.find((f) => f.startsWith(`${videoId}.`));
   
@@ -215,8 +114,6 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
       "bestvideo+bestaudio",
       "-o",
       outputTemplate,
-      "--merge-output-format",
-      "mp4",
       "--progress",
       url,
     ], {
@@ -274,15 +171,7 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
         }
 
         if (downloadedFile && fs.existsSync(downloadedFile)) {
-          // Convert to MP4 if needed
-          try {
-            const finalFile = await convertToMp4(downloadedFile, jobId);
-            resolve(finalFile);
-          } catch (conversionError) {
-            console.error("Video conversion failed:", conversionError);
-            // Still return the original file if conversion fails
-            resolve(downloadedFile);
-          }
+          resolve(downloadedFile);
         } else {
           reject(new Error("Download completed but file not found"));
         }
@@ -298,23 +187,24 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
 }
 
 /**
- * Clip video using ffmpeg
+ * Clip video using ffmpeg - accepts any format, outputs MP4
  */
 async function clipVideo(
   jobId: string,
-  inputFile: string,
+  inputFile: string,  // Can be .webm, .mkv, .mp4, etc.
   startTime: string,
   endTime: string
 ): Promise<string> {
   updateJobStatus(jobId, "clipping", { progress: 50 });
 
-  const ext = path.extname(inputFile);
-  const basename = path.basename(inputFile, ext);
+  const videoId = extractVideoId(path.basename(inputFile, path.extname(inputFile)));
   
   // Sanitize times for filename (replace : with -)
   const startSafe = startTime.replace(/:/g, "-");
   const endSafe = endTime.replace(/:/g, "-");
-  const outputFile = path.join(CLIPS_DIR, `${basename}_${startSafe}_${endSafe}${ext}`);
+  
+  // Always output to MP4, regardless of input format
+  const outputFile = path.join(CLIPS_DIR, `${videoId}_${startSafe}_${endSafe}.mp4`);
 
   // Check if clip already exists
   if (fs.existsSync(outputFile)) {
@@ -325,15 +215,25 @@ async function clipVideo(
 
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
+      "-ss",
+      startTime,        // Seek to start time (fast seek before input)
       "-i",
       inputFile,
-      "-ss",
-      startTime,
       "-to",
-      endTime,
-      "-c",
-      "copy",
-      "-y", // Overwrite output file
+      endTime,          // End time
+      "-c:v",
+      "libx264",        // H.264 video codec
+      "-preset",
+      "veryslow",       // Highest quality preset
+      "-crf",
+      "18",             // Near-lossless quality
+      "-c:a",
+      "aac",            // AAC audio codec
+      "-b:a",
+      "320k",           // Maximum audio bitrate
+      "-movflags",
+      "+faststart",     // Enable streaming
+      "-y",             // Overwrite output file
       outputFile,
     ]);
 
@@ -350,7 +250,7 @@ async function clipVideo(
       if (timeMatch) {
         const job = getJob(jobId);
         if (job) {
-          // Simple progress estimation
+          // Calculate progress based on clip duration
           job.progress = Math.min(95, 50 + Math.floor(Math.random() * 45));
           saveJob(job);
         }
