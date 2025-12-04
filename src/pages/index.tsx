@@ -189,16 +189,43 @@ export default function Home() {
 
       const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to process video");
+      if (res.ok) {
+        setJob(data.job);
+        updateParams({ jobId: data.jobId });
+        // Store jobId in localStorage
+        localStorage.setItem(STORAGE_KEY, data.jobId);
+      } else {
+        const errorData = await res.json();
+        setError(errorData.error || "Failed to process video");
       }
-
-      setJob(data.job);
-      updateParams({ jobId: data.jobId });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      setError("Network error. Please try again.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleCancelJob = async () => {
+    if (!job) return;
+
+    try {
+      const res = await fetch("/api/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: job.id }),
+      });
+
+      if (res.ok) {
+        setJob(null);
+        setError(null);
+        updateParams({ jobId: undefined });
+        localStorage.removeItem(STORAGE_KEY);
+      } else {
+        const errorData = await res.json();
+        setError(errorData.error || "Failed to cancel job");
+      }
+    } catch (err) {
+      setError("Network error. Please try again.");
     }
   };
 
