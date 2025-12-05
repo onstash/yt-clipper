@@ -2,7 +2,96 @@
 
 A high-performance web application for downloading and clipping YouTube videos with precision. Built with Next.js, featuring intelligent file caching and high-quality MP4 output.
 
-![Architecture Diagram](/.gemini/antigravity/brain/756b0898-9f4f-4750-ba1d-1269a34fe5c4/architecture_diagram_1764861386824.png)
+## 🏗️ Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "Frontend (Next.js)"
+        UI["User Interface<br/>(index.tsx)"]
+        Form["Form Input<br/>(URL + Time Range)"]
+        Status["Status Polling<br/>(useEffect)"]
+    end
+
+    subgraph "API Routes"
+        ProcessAPI["POST /api/process<br/>(Create Job & Start Processing)"]
+        StatusAPI["GET /api/status/[jobId]<br/>(Get Job Status)"]
+        CancelAPI["POST /api/cancel<br/>(Cancel Job)"]
+    end
+
+    subgraph "Job Queue (File-based)"
+        CreateJob["createJob()<br/>(Generate Job ID)"]
+        JobFile["data/jobs/{jobId}.json<br/>(Persist Job State)"]
+        GetJob["getJob()<br/>(Read Job State)"]
+        UpdateJob["updateJobStatus()<br/>(Update Progress)"]
+    end
+
+    subgraph "Video Processing"
+        ProcessVideo["processVideo()<br/>(Main Orchestrator)"]
+        CheckCache["findExistingVideo()<br/>(Check Cache)"]
+        YtDlp["yt-dlp<br/>(Download Video)"]
+        FFmpeg["ffmpeg<br/>(Clip & Convert to MP4)"]
+    end
+
+    subgraph "Storage"
+        Downloads["public/downloads/<br/>(Full Videos Cache)"]
+        Clips["public/clips/<br/>(MP4 Clips)"]
+    end
+
+    %% User Flow
+    UI --> Form
+    Form --> ProcessAPI
+    ProcessAPI --> CreateJob
+    CreateJob --> JobFile
+    ProcessAPI --> ProcessVideo
+    
+    %% Processing Flow
+    ProcessVideo --> CheckCache
+    CheckCache -->|Not Found| YtDlp
+    CheckCache -->|Found| FFmpeg
+    YtDlp --> Downloads
+    YtDlp --> UpdateJob
+    Downloads --> FFmpeg
+    FFmpeg --> UpdateJob
+    FFmpeg --> Clips
+    UpdateJob --> JobFile
+
+    %% Status Polling Flow
+    UI --> Status
+    Status --> StatusAPI
+    StatusAPI --> GetJob
+    GetJob --> JobFile
+    StatusAPI --> Status
+    
+    %% Cancel Flow
+    UI -.->|Cancel| CancelAPI
+    CancelAPI -.-> JobFile
+
+    %% Download Flow
+    Clips -.->|Download| UI
+
+    style UI fill:#4285f4,stroke:#1a73e8,color:#fff
+    style ProcessAPI fill:#34a853,stroke:#0d652d,color:#fff
+    style StatusAPI fill:#34a853,stroke:#0d652d,color:#fff
+    style CancelAPI fill:#34a853,stroke:#0d652d,color:#fff
+    style JobFile fill:#fbbc04,stroke:#ea8600,color:#000
+    style ProcessVideo fill:#ea4335,stroke:#c5221f,color:#fff
+    style YtDlp fill:#9334e9,stroke:#7c3aed,color:#fff
+    style FFmpeg fill:#9334e9,stroke:#7c3aed,color:#fff
+    style Downloads fill:#f1f3f4,stroke:#5f6368,color:#000
+    style Clips fill:#f1f3f4,stroke:#5f6368,color:#000
+```
+
+### Architecture Flow
+
+1. **User Submission** → User enters YouTube URL and time range in the form
+2. **Job Creation** → API creates a job with unique ID and persists to `data/jobs/{jobId}.json`
+3. **Async Processing** → Video processing starts in background (non-blocking)
+4. **Cache Check** → System checks `public/downloads/` for existing video
+5. **Download** → If not cached, yt-dlp downloads video in native format
+6. **Clip & Convert** → ffmpeg clips the video and outputs high-quality MP4 to `public/clips/`
+7. **Status Updates** → Job status/progress updated throughout the process
+8. **Polling** → Frontend polls `/api/status/[jobId]` for real-time updates
+9. **Download** → User downloads the completed MP4 clip
 
 ## ✨ Features
 
@@ -13,25 +102,6 @@ A high-performance web application for downloading and clipping YouTube videos w
 - **Real-time Progress** - Live progress tracking with status updates
 - **URL Persistence** - Form state synced with URL query parameters
 - **Page Refresh Safe** - Resume processing after page refresh
-
-## 🏗️ Architecture
-
-### Data Flow
-
-1. **User Input** → Form submission with YouTube URL and time range
-2. **Job Creation** → API creates job and persists to file system
-3. **Video Download** → yt-dlp downloads video in native format (cached)
-4. **Clip & Convert** → ffmpeg clips video and outputs high-quality MP4
-5. **Status Polling** → Real-time progress updates via API
-6. **Download** → User downloads the clipped MP4 file
-
-### Key Components
-
-- **Frontend**: Next.js (Pages Router), React, shadcn UI, Tailwind CSS
-- **Backend**: Next.js API Routes, Node.js
-- **Video Processing**: yt-dlp (download), ffmpeg (clip & convert)
-- **Job Queue**: File-based persistence (`data/jobs/*.json`)
-- **Storage**: `public/downloads/` (full videos), `public/clips/` (clips)
 
 ## 🚀 Quick Start
 
