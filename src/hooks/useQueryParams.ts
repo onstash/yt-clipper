@@ -2,7 +2,7 @@ import { useRouter } from "next/router";
 import { useCallback } from "react";
 
 interface QueryParams {
-  v?: string;      // videoId instead of full URL
+  videoId?: string;      // videoId instead of full URL
   start?: string;
   end?: string;
   jobId?: string;
@@ -21,7 +21,7 @@ export function useQueryParams(): UseQueryParamsReturn {
 
   // Parse current query params
   const params: QueryParams = {
-    v: router.query.v as string | undefined,
+    videoId: router.query.videoId as string | undefined,
     start: router.query.start as string | undefined,
     end: router.query.end as string | undefined,
     jobId: router.query.jobId as string | undefined,

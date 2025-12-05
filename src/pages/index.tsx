@@ -19,8 +19,8 @@ export default function Home() {
   // Form state
   const [url, setUrl] = useState(() => {
     // Reconstruct URL from videoId if present
-    if (params.v) {
-      return `https://www.youtube.com/watch?v=${params.v}`;
+    if (params.videoId) {
+      return `https://www.youtube.com/watch?v=${params.videoId}`;
     }
     return "";
   });
@@ -44,8 +44,8 @@ export default function Home() {
 
   // Sync form with query params on mount (with validation)
   useEffect(() => {
-    if (params.v || params.start || params.end) {
-      const reconstructedUrl = params.v ? `https://www.youtube.com/watch?v=${params.v}` : "";
+    if (params.videoId || params.start || params.end) {
+      const reconstructedUrl = params.videoId ? `https://www.youtube.com/watch?v=${params.videoId}` : "";
       const result = inputSchema.safeParse({
         url: reconstructedUrl,
         start: params.start || "",
@@ -53,12 +53,12 @@ export default function Home() {
       });
       
       if (result.success) {
-        if (params.v && !url) setUrl(reconstructedUrl);
+        if (params.videoId && !url) setUrl(reconstructedUrl);
         if (params.start) setStartTime(params.start);
         if (params.end) setEndTime(params.end);
       } else {
         // Invalid params, clear them
-        updateParams({ v: undefined, start: undefined, end: undefined });
+        updateParams({ videoId: undefined, start: undefined, end: undefined });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -156,7 +156,7 @@ export default function Home() {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       const videoId = url ? extractVideoIdFromUrl(url) : undefined;
-      updateParams({ v: videoId || undefined, start: startTime, end: endTime });
+      updateParams({ videoId: videoId || undefined, start: startTime, end: endTime });
     }, 500);
 
     return () => clearTimeout(timeoutId);
