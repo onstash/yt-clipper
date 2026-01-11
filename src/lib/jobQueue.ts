@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { Job, CreateJobInput } from "./types";
+import { extractVideoIdFromUrl } from "./validation";
 
 const JOBS_DIR = path.join(process.cwd(), "data", "jobs");
 
@@ -10,10 +11,19 @@ if (!fs.existsSync(JOBS_DIR)) {
 }
 
 /**
- * Generate a unique job ID
+ * Generate a job ID from video URL and time range
+ * Format: {videoId}_{startTime}_{endTime} (with : replaced by -)
  */
-function generateJobId(): string {
-  return `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+function generateJobId(url: string, start: string, end: string): string {
+  const videoId = extractVideoIdFromUrl(url);
+  const startSafe = start.replace(/:/g, "-");
+  const endSafe = end.replace(/:/g, "-");
+
+  if (!videoId) {
+    // Fallback to timestamp-based ID if video ID extraction fails
+    return `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  }
+  return `${videoId}_${startSafe}_${endSafe}`;
 }
 
 /**
@@ -28,7 +38,7 @@ function getJobFilePath(jobId: string): string {
  */
 export function createJob(input: CreateJobInput): Job {
   const job: Job = {
-    id: generateJobId(),
+    id: generateJobId(input.url, input.start, input.end),
     status: "pending",
     url: input.url,
     startTime: input.start,
@@ -98,7 +108,7 @@ export function updateJobStatus(
  */
 export function deleteJob(jobId: string): boolean {
   const jobPath = path.join(JOBS_DIR, `${jobId}.json`);
-  
+
   try {
     if (fs.existsSync(jobPath)) {
       fs.unlinkSync(jobPath);
@@ -108,7 +118,7 @@ export function deleteJob(jobId: string): boolean {
   } catch (error) {
     console.error(`Error deleting job ${jobId}:`, error);
   }
-  
+
   return false;
 }
 

@@ -47,3 +47,6 @@ next-env.d.ts
 /downloads/*.part
 /clips/*.mp4
 /clips/*.mkv
+/public/downloads/
+/public/clips/
+src/transcript.json
