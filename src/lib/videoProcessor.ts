@@ -8,7 +8,16 @@ const DOWNLOADS_DIR = path.join(process.cwd(), "public", "downloads");
 const CLIPS_DIR = path.join(process.cwd(), "public", "clips");
 
 // Video formats to check for existing downloads
-const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mkv', '.flv', '.avi', '.mov', '.3gp', '.m4v']);
+const VIDEO_EXTENSIONS = new Set([
+  ".mp4",
+  ".webm",
+  ".mkv",
+  ".flv",
+  ".avi",
+  ".mov",
+  ".3gp",
+  ".m4v",
+]);
 
 // Ensure directories exist
 if (!fs.existsSync(DOWNLOADS_DIR)) {
@@ -61,31 +70,55 @@ export async function processVideo(jobId: string): Promise<void> {
 
     // Download video
     const downloadedFile = await downloadVideo(jobId, job.url);
-    
-    // Clip video
-    const clippedFile = await clipVideo(
-      jobId,
-      downloadedFile,
-      job.startTime,
-      job.endTime
-    );
+
+    // Check if user wants full video (start=0, end=duration) - skip clipping
+    const startParts = job.startTime.split(":").map(Number);
+    const endParts = job.endTime.split(":").map(Number);
+    const startSeconds =
+      startParts[0] * 3600 + startParts[1] * 60 + startParts[2];
+    const endSeconds = endParts[0] * 3600 + endParts[1] * 60 + endParts[2];
+
+    // Fetch metadata to get actual duration
+    const metadata = await fetchVideoMetadata(job.url);
+    const isFullVideo =
+      startSeconds === 0 &&
+      metadata &&
+      Math.abs(endSeconds - metadata.duration) < 2;
+
+    let outputFile: string;
+
+    if (isFullVideo) {
+      // Skip clipping - use downloaded file directly
+      console.log("Full video requested, skipping clipping");
+      updateJobStatus(jobId, "clipping", { progress: 100 });
+      outputFile = downloadedFile;
+    } else {
+      // Clip video
+      outputFile = await clipVideo(
+        jobId,
+        downloadedFile,
+        job.startTime,
+        job.endTime
+      );
+    }
 
     // Mark as completed
     updateJobStatus(jobId, "completed", {
       downloadedFile: `/downloads/${path.basename(downloadedFile)}`,
-      clippedFile: `/clips/${path.basename(clippedFile)}`,
+      clippedFile: isFullVideo
+        ? `/downloads/${path.basename(downloadedFile)}`
+        : `/clips/${path.basename(outputFile)}`,
       progress: 100,
     });
-    
+
     // Cleanup job file after successful completion
     setTimeout(() => deleteJob(jobId), 5000); // 5 second delay for client to fetch final status
-    
   } catch (error) {
     console.error(`Error processing job ${jobId}:`, error);
     updateJobStatus(jobId, "failed", {
       error: error instanceof Error ? error.message : "Unknown error",
     });
-    
+
     // Cleanup job file after failure
     setTimeout(() => deleteJob(jobId), 30000); // 30 second delay for error review
   }
@@ -97,7 +130,7 @@ export async function processVideo(jobId: string): Promise<void> {
 function findExistingVideo(videoId: string): string | null {
   try {
     const files = fs.readdirSync(DOWNLOADS_DIR);
-    
+
     for (const ext of VIDEO_EXTENSIONS) {
       const filename = `${videoId}${ext}`;
       if (files.includes(filename)) {
@@ -105,14 +138,21 @@ function findExistingVideo(videoId: string): string | null {
       }
     }
   } catch (err) {
-    console.error('Error reading downloads directory:', err);
+    console.error("Error reading downloads directory:", err);
   }
-  
+
   return null;
 }
 
 /**
- * Fetch video metadata using yt-dlp (without downloading)
+ * Get cached metadata file path for a video ID
+ */
+function getMetadataCachePath(videoId: string): string {
+  return path.join(DOWNLOADS_DIR, `${videoId}.metadata.json`);
+}
+
+/**
+ * Fetch video metadata using yt-dlp (with caching)
  */
 export async function fetchVideoMetadata(url: string): Promise<{
   title: string;
@@ -120,12 +160,26 @@ export async function fetchVideoMetadata(url: string): Promise<{
   thumbnail: string;
   uploader: string;
 } | null> {
-  return new Promise((resolve) => {
-    const ytDlp = spawn("yt-dlp", [
-      "--dump-json",
-      "--skip-download",
-      url,
-    ]);
+  // Extract video ID for caching
+  const videoId = extractVideoId(url);
+
+  // Check for cached metadata
+  if (videoId) {
+    const cachePath = getMetadataCachePath(videoId);
+    if (fs.existsSync(cachePath)) {
+      try {
+        const cached = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+        console.log(`Using cached metadata for ${videoId}`);
+        return cached;
+      } catch (err) {
+        console.error("Error reading cached metadata:", err);
+        // Continue to fetch fresh metadata
+      }
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    const ytDlp = spawn("yt-dlp", ["--dump-json", "--skip-download", url]);
 
     let jsonData = "";
 
@@ -140,19 +194,32 @@ export async function fetchVideoMetadata(url: string): Promise<{
     ytDlp.on("close", (code: number | null) => {
       if (code === 0 && jsonData) {
         try {
-          const metadata = JSON.parse(jsonData) as {
+          const rawMetadata = JSON.parse(jsonData) as {
             title?: string;
             duration?: number;
             thumbnail?: string;
             uploader?: string;
             channel?: string;
           };
-          resolve({
-            title: metadata.title || "Unknown",
-            duration: metadata.duration || 0,
-            thumbnail: metadata.thumbnail || "",
-            uploader: metadata.uploader || metadata.channel || "Unknown",
-          });
+          const metadata = {
+            title: rawMetadata.title || "Unknown",
+            duration: rawMetadata.duration || 0,
+            thumbnail: rawMetadata.thumbnail || "",
+            uploader: rawMetadata.uploader || rawMetadata.channel || "Unknown",
+          };
+
+          // Cache the metadata
+          if (videoId) {
+            try {
+              const cachePath = getMetadataCachePath(videoId);
+              fs.writeFileSync(cachePath, JSON.stringify(metadata, null, 2));
+              console.log(`Cached metadata for ${videoId}`);
+            } catch (err) {
+              console.error("Error caching metadata:", err);
+            }
+          }
+
+          resolve(metadata);
         } catch (err) {
           console.error("Error parsing metadata JSON:", err);
           resolve(null);
@@ -182,40 +249,33 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
 
   // Check if video already exists in any format
   const existingVideo = findExistingVideo(videoId);
-  
+
   if (existingVideo) {
     console.log(`Video already downloaded: ${existingVideo}`);
     updateJobStatus(jobId, "downloading", { progress: 50 });
     return existingVideo;
   }
 
-  const outputTemplate = path.join(
-    DOWNLOADS_DIR,
-    `${videoId}.%(ext)s`
-  );
+  const outputTemplate = path.join(DOWNLOADS_DIR, `${videoId}.%(ext)s`);
 
   return new Promise((resolve, reject) => {
-    const ytDlp = spawn("yt-dlp", [
-      "-f",
-      "bestvideo+bestaudio",
-      "-o",
-      outputTemplate,
-      "--progress",
-      url,
-    ], {
-      env: {
-        ...process.env,
-        PATH: process.env.PATH || "",
+    const ytDlp = spawn(
+      "yt-dlp",
+      ["-f", "bestvideo+bestaudio", "-o", outputTemplate, "--progress", url],
+      {
+        env: {
+          ...process.env,
+          PATH: process.env.PATH || "",
+        },
       }
-    });
+    );
 
     let downloadedFile = "";
 
     ytDlp.stdout.on("data", (data: Buffer) => {
       const output = data.toString();
       console.log(`yt-dlp: ${output}`);
-      updateJobStatus(jobId, "downloading", { progress: 25 });
-      // Parse progress
+      // Parse progress percentage from yt-dlp output
       const progressMatch = output.match(/(\d+\.\d+)%/);
       if (progressMatch) {
         const progress = Math.floor(parseFloat(progressMatch[1]) / 2); // 0-50% for download
@@ -277,20 +337,24 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
  */
 async function clipVideo(
   jobId: string,
-  inputFile: string,  // Can be .webm, .mkv, .mp4, etc.
+  inputFile: string, // Can be .webm, .mkv, .mp4, etc.
   startTime: string,
   endTime: string
 ): Promise<string> {
   updateJobStatus(jobId, "clipping", { progress: 50 });
 
-  const videoId = extractVideoId(path.basename(inputFile, path.extname(inputFile)));
-  
+  // The filename (without extension) is the video ID
+  const videoId = path.basename(inputFile, path.extname(inputFile));
+
   // Sanitize times for filename (replace : with -)
   const startSafe = startTime.replace(/:/g, "-");
   const endSafe = endTime.replace(/:/g, "-");
-  
+
   // Always output to MP4, regardless of input format
-  const outputFile = path.join(CLIPS_DIR, `${videoId}_${startSafe}_${endSafe}.mp4`);
+  const outputFile = path.join(
+    CLIPS_DIR,
+    `${videoId}_${startSafe}_${endSafe}.mp4`
+  );
 
   // Check if clip already exists
   if (fs.existsSync(outputFile)) {
@@ -300,26 +364,42 @@ async function clipVideo(
   }
 
   return new Promise((resolve, reject) => {
+    // Calculate clip duration (endTime - startTime)
+    const startParts = startTime.split(":").map(Number);
+    const endParts = endTime.split(":").map(Number);
+    const startSeconds =
+      startParts[0] * 3600 + startParts[1] * 60 + startParts[2];
+    const endSeconds = endParts[0] * 3600 + endParts[1] * 60 + endParts[2];
+    const durationSeconds = endSeconds - startSeconds;
+
+    // Convert duration to HH:MM:SS format
+    const durationHours = Math.floor(durationSeconds / 3600);
+    const durationMinutes = Math.floor((durationSeconds % 3600) / 60);
+    const durationSecs = durationSeconds % 60;
+    const duration = `${String(durationHours).padStart(2, "0")}:${String(
+      durationMinutes
+    ).padStart(2, "0")}:${String(durationSecs).padStart(2, "0")}`;
+
     const ffmpeg = spawn("ffmpeg", [
       "-ss",
-      startTime,        // Seek to start time (fast seek before input)
+      startTime, // Seek to start time (fast seek before input)
       "-i",
       inputFile,
-      "-to",
-      endTime,          // End time
+      "-t",
+      duration, // Duration of clip (not end time, since -ss is before -i)
       "-c:v",
-      "libx264",        // H.264 video codec
+      "libx264", // H.264 video codec
       "-preset",
-      "veryslow",       // Highest quality preset
+      "veryslow", // Highest quality preset
       "-crf",
-      "18",             // Near-lossless quality
+      "18", // Near-lossless quality
       "-c:a",
-      "aac",            // AAC audio codec
+      "aac", // AAC audio codec
       "-b:a",
-      "320k",           // Maximum audio bitrate
+      "320k", // Maximum audio bitrate
       "-movflags",
-      "+faststart",     // Enable streaming
-      "-y",             // Overwrite output file
+      "+faststart", // Enable streaming
+      "-y", // Overwrite output file
       outputFile,
     ]);
 
@@ -332,13 +412,25 @@ async function clipVideo(
       console.log(`ffmpeg: ${output}`);
 
       // Update progress (50-100% for clipping)
+      // Parse ffmpeg time output: time=00:00:05.23
       const timeMatch = output.match(/time=(\d+):(\d+):(\d+)/);
       if (timeMatch) {
-        const job = getJob(jobId);
-        if (job) {
-          // Calculate progress based on clip duration
-          job.progress = Math.min(95, 50 + Math.floor(Math.random() * 45));
-          saveJob(job);
+        const currentSeconds =
+          parseInt(timeMatch[1]) * 3600 +
+          parseInt(timeMatch[2]) * 60 +
+          parseInt(timeMatch[3]);
+
+        // Use durationSeconds already calculated above
+        if (durationSeconds > 0) {
+          // Scale to 50-95% range (100% only on close event)
+          const progressPercent = Math.min(currentSeconds / durationSeconds, 1);
+          const clipProgress = Math.floor(progressPercent * 45) + 50; // 50-95%
+
+          const job = getJob(jobId);
+          if (job) {
+            job.progress = clipProgress;
+            saveJob(job);
+          }
         }
       }
     });
@@ -356,7 +448,8 @@ async function clipVideo(
       }
     });
 
-      reject(error);
+    ffmpeg.on("error", (error: Error) => {
+      reject(new Error(`Failed to spawn ffmpeg: ${error.message}`));
     });
   });
 }
