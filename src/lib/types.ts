@@ -1,6 +1,18 @@
 import { InputSchema } from "./validation";
 
-export type JobStatus = "pending" | "downloading" | "clipping" | "completed" | "failed";
+export type JobStatus =
+  | "pending"
+  | "downloading"
+  | "clipping"
+  | "completed"
+  | "failed";
+
+export interface VideoMetadata {
+  title: string;
+  duration: number;
+  thumbnail: string;
+  uploader: string;
+}
 
 export interface Job {
   id: string;
@@ -12,10 +24,12 @@ export interface Job {
   downloadedFile?: string;
   clippedFile?: string;
   error?: string;
+  metadata?: VideoMetadata;
   createdAt: number;
   updatedAt: number;
+  expiresAt: number;
 }
 
 export interface CreateJobInput extends InputSchema {
-  // Extends the validated input schema
+  metadata?: VideoMetadata;
 }

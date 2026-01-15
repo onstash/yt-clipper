@@ -132,7 +132,7 @@ function findExistingVideo(videoId: string): string | null {
     const files = fs.readdirSync(DOWNLOADS_DIR);
 
     for (const ext of VIDEO_EXTENSIONS) {
-      const filename = `${videoId}${ext}`;
+      const filename = `${videoId}_download${ext}`;
       if (files.includes(filename)) {
         return path.join(DOWNLOADS_DIR, filename);
       }
@@ -151,30 +151,39 @@ function getMetadataCachePath(videoId: string): string {
   return path.join(DOWNLOADS_DIR, `${videoId}.metadata.json`);
 }
 
-/**
- * Fetch video metadata using yt-dlp (with caching)
- */
-export async function fetchVideoMetadata(url: string): Promise<{
+type VideoMetadata = {
   title: string;
   duration: number;
   thumbnail: string;
-  uploader: string;
-} | null> {
+  uploader?: string;
+  channel?: string;
+};
+
+const videoIdMetadataCache = new Map<string, VideoMetadata>();
+
+/**
+ * Fetch video metadata using yt-dlp (with caching)
+ */
+export async function fetchVideoMetadata(
+  url: string
+): Promise<VideoMetadata | null> {
   // Extract video ID for caching
   const videoId = extractVideoId(url);
+  if (!videoId) return null;
+  const cachedMetadata = videoIdMetadataCache.get(videoId);
+  if (cachedMetadata) return cachedMetadata;
 
   // Check for cached metadata
-  if (videoId) {
-    const cachePath = getMetadataCachePath(videoId);
-    if (fs.existsSync(cachePath)) {
-      try {
-        const cached = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
-        console.log(`Using cached metadata for ${videoId}`);
-        return cached;
-      } catch (err) {
-        console.error("Error reading cached metadata:", err);
-        // Continue to fetch fresh metadata
-      }
+  const cachePath = getMetadataCachePath(videoId);
+  if (fs.existsSync(cachePath)) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+      videoIdMetadataCache.set(videoId, cached);
+      console.log(`Using cached metadata for ${videoId}`);
+      return cached;
+    } catch (err) {
+      console.error("Error reading cached metadata:", err);
+      // Continue to fetch fresh metadata
     }
   }
 
@@ -194,19 +203,14 @@ export async function fetchVideoMetadata(url: string): Promise<{
     ytDlp.on("close", (code: number | null) => {
       if (code === 0 && jsonData) {
         try {
-          const rawMetadata = JSON.parse(jsonData) as {
-            title?: string;
-            duration?: number;
-            thumbnail?: string;
-            uploader?: string;
-            channel?: string;
-          };
+          const rawMetadata = JSON.parse(jsonData) as VideoMetadata;
           const metadata = {
             title: rawMetadata.title || "Unknown",
             duration: rawMetadata.duration || 0,
             thumbnail: rawMetadata.thumbnail || "",
             uploader: rawMetadata.uploader || rawMetadata.channel || "Unknown",
           };
+          videoIdMetadataCache.set(videoId, metadata);
 
           // Cache the metadata
           if (videoId) {
@@ -256,7 +260,10 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
     return existingVideo;
   }
 
-  const outputTemplate = path.join(DOWNLOADS_DIR, `${videoId}.%(ext)s`);
+  const outputTemplate = path.join(
+    DOWNLOADS_DIR,
+    `${videoId}_download.%(ext)s`
+  );
 
   return new Promise((resolve, reject) => {
     const ytDlp = spawn(
@@ -309,7 +316,7 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
         if (!downloadedFile) {
           const files = fs.readdirSync(DOWNLOADS_DIR);
           const foundFile = files.find((f: string) =>
-            f.startsWith(`${videoId}.`)
+            f.startsWith(`${videoId}_download.`)
           );
           if (foundFile) {
             downloadedFile = path.join(DOWNLOADS_DIR, foundFile);
@@ -353,7 +360,7 @@ async function clipVideo(
   // Always output to MP4, regardless of input format
   const outputFile = path.join(
     CLIPS_DIR,
-    `${videoId}_${startSafe}_${endSafe}.mp4`
+    `${videoId}_clip_${startSafe}_to_${endSafe}.mp4`
   );
 
   // Check if clip already exists

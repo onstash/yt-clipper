@@ -5,9 +5,9 @@ import { z } from "zod";
 export const timeRegex = /^(?:([0-1]?\d|2[0-3]):)?([0-5]?\d):([0-5]\d)$/;
 
 // Matches all common YouTube URL formats with optional query parameters
-// Supports: watch?v=, embed/, v/, /live/, and youtu.be/ formats
+// Supports: watch?v=, embed/, v/, /live/, /shorts/, and youtu.be/ formats
 export const youtubeUrlRegex =
-  /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|live\/)|youtu\.be\/)[\w-]{11}(\?.*)?$/;
+  /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|live\/|shorts\/)|youtu\.be\/)[\w-]{11}(\?.*)?$/;
 
 /**
  * Normalize time string to HH:MM:SS format
@@ -54,7 +54,7 @@ export function secondsToTime(totalSeconds: number): string {
  */
 export function extractVideoIdFromUrl(url: string): string | null {
   const patterns = [
-    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/live\/)([\w-]{11})/,
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/live\/|youtube\.com\/shorts\/)([\w-]{11})/,
   ];
 
   for (const pattern of patterns) {
@@ -87,7 +87,6 @@ export function extractTimestampFromUrl(url: string): number | null {
 export const inputSchema = z
   .object({
     url: z.string().regex(youtubeUrlRegex, "Must be a valid YouTube URL"),
-    videoName: z.string().min(1, "Video name is required"),
     start: z
       .string()
       .regex(timeRegex, "Start time must be mm:ss or hh:mm:ss")

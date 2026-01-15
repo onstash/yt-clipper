@@ -1,0 +1,10 @@
+.next
+.output
+node_modules
+dist
+data/jobs/*.json
+public/downloads/*
+public/clips/*
+*.log
+.env
+.DS_Store

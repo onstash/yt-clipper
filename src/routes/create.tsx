@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
-import { useQueryParams } from "@/hooks/useQueryParams";
+import { z } from "zod";
 import {
   inputSchema,
   extractVideoIdFromUrl,
@@ -41,11 +42,31 @@ import {
   Video,
   Bug,
 } from "lucide-react";
+import {
+  processVideoFn,
+  getJobStatusFn,
+  cancelJobFn,
+  getMetadataFn,
+} from "@/server/video.fn";
+
+// Search params schema for type-safe URL params
+const searchSchema = z.object({
+  videoId: z.string().optional(),
+  start: z.string().optional(),
+  end: z.string().optional(),
+  jobId: z.string().optional(),
+});
+
+export const Route = createFileRoute("/create")({
+  validateSearch: searchSchema,
+  component: Home,
+});
 
 const STORAGE_KEY = "yt-clipper-jobId";
 
-export default function Home() {
-  const { params, updateParams } = useQueryParams();
+function Home() {
+  const search = Route.useSearch();
+  const navigate = useNavigate();
 
   // Job state
   const [job, setJob] = useState<Job | null>(null);
@@ -61,15 +82,30 @@ export default function Home() {
   } | null>(null);
   const [isFetchingMetadata, setIsFetchingMetadata] = useState(false);
 
+  // Helper to update URL params
+  const updateParams = useCallback(
+    (newParams: Partial<z.infer<typeof searchSchema>>) => {
+      const updatedSearch = { ...search, ...newParams };
+      // Remove undefined values
+      Object.keys(updatedSearch).forEach((key) => {
+        const k = key as keyof typeof updatedSearch;
+        if (updatedSearch[k] === undefined || updatedSearch[k] === "") {
+          delete updatedSearch[k];
+        }
+      });
+      navigate({ to: "/create", search: updatedSearch, replace: true });
+    },
+    [search, navigate]
+  );
+
   // TanStack Form
   const form = useForm({
     defaultValues: {
-      url: params.videoId
-        ? `https://www.youtube.com/watch?v=${params.videoId}`
+      url: search.videoId
+        ? `https://www.youtube.com/watch?v=${search.videoId}`
         : "",
-      videoName: "",
-      start: params.start || "",
-      end: params.end || "",
+      start: search.start || "",
+      end: search.end || "",
     },
     validators: {
       onChange: inputSchema,
@@ -81,29 +117,14 @@ export default function Home() {
       setJob(null);
 
       try {
-        const res = await fetch("/api/process", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: value.url,
-            videoName: value.videoName,
-            start: value.start,
-            end: value.end,
-          }),
-        });
-
-        const data = await res.json();
-        console.log(data);
-
-        if (res.ok) {
-          setJob(data.job);
-          updateParams({ jobId: data.jobId });
-          localStorage.setItem(STORAGE_KEY, data.jobId);
-        } else {
-          setError(data.error || "Failed to process video");
-        }
-      } catch {
-        setError("Network error. Please try again.");
+        const result = await processVideoFn({ data: value });
+        setJob(result.job);
+        updateParams({ jobId: result.jobId });
+        localStorage.setItem(STORAGE_KEY, result.jobId);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to process video"
+        );
       } finally {
         setIsSubmitting(false);
       }
@@ -112,15 +133,14 @@ export default function Home() {
 
   // Sync form with query params on mount (with validation)
   useEffect(() => {
-    if (params.videoId || params.start || params.end) {
-      const reconstructedUrl = params.videoId
-        ? `https://www.youtube.com/watch?v=${params.videoId}`
+    if (search.videoId || search.start || search.end) {
+      const reconstructedUrl = search.videoId
+        ? `https://www.youtube.com/watch?v=${search.videoId}`
         : "";
       const result = inputSchema.safeParse({
         url: reconstructedUrl,
-        videoName: "placeholder", // Just validating URL format, not videoName
-        start: params.start || "",
-        end: params.end || "",
+        start: search.start || "",
+        end: search.end || "",
       });
 
       if (!result.success) {
@@ -133,7 +153,7 @@ export default function Home() {
 
   // Load jobId from localStorage or URL params on mount
   useEffect(() => {
-    const urlJobId = params.jobId;
+    const urlJobId = search.jobId;
     const storedJobId =
       typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null;
 
@@ -156,9 +176,9 @@ export default function Home() {
   const fetchJobStatus = useCallback(
     async (jobId: string) => {
       try {
-        const res = await fetch(`/api/status/${jobId}`);
-        if (res.ok) {
-          const jobData = await res.json();
+        const jobData = await getJobStatusFn({ data: { jobId } });
+
+        if (jobData) {
           setJob(jobData);
 
           // Clear localStorage when job is completed or failed
@@ -169,7 +189,7 @@ export default function Home() {
           if (jobData.status === "failed") {
             setError(jobData.error || "Processing failed");
           }
-        } else if (res.status === 404) {
+        } else {
           setError("Job not found or expired");
           updateParams({ jobId: undefined });
           localStorage.removeItem(STORAGE_KEY);
@@ -198,23 +218,13 @@ export default function Home() {
     if (!job) return;
 
     try {
-      const res = await fetch("/api/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.id }),
-      });
-
-      if (res.ok) {
-        setJob(null);
-        setError(null);
-        updateParams({ jobId: undefined });
-        localStorage.removeItem(STORAGE_KEY);
-      } else {
-        const errorData = await res.json();
-        setError(errorData.error || "Failed to cancel job");
-      }
-    } catch {
-      setError("Network error. Please try again.");
+      await cancelJobFn({ data: { jobId: job.id } });
+      setJob(null);
+      setError(null);
+      updateParams({ jobId: undefined });
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel job");
     }
   };
 
@@ -232,6 +242,68 @@ export default function Home() {
     return err.message || "";
   };
 
+  // Fetch metadata effect
+  const urlValue = form.state.values.url;
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      if (!urlValue) {
+        setMetadata(null);
+        return;
+      }
+
+      setIsFetchingMetadata(true);
+      try {
+        const data = await getMetadataFn({ data: { url: urlValue } });
+        if (data) {
+          setMetadata(data);
+          // Auto-set start time to 00:00:00 if not already set
+          if (!form.state.values.start) {
+            form.setFieldValue("start", "00:00:00");
+          }
+          // Auto-set end time to video duration if not already set
+          if (!form.state.values.end && data.duration) {
+            form.setFieldValue("end", secondsToTime(data.duration));
+          }
+        } else {
+          setMetadata(null);
+        }
+      } catch (err) {
+        console.error("Error fetching metadata:", err);
+        setMetadata(null);
+      } finally {
+        setIsFetchingMetadata(false);
+      }
+    };
+
+    const timeoutId = setTimeout(fetchMetadata, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [urlValue, form]);
+
+  // Update query params effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      const videoId = urlValue ? extractVideoIdFromUrl(urlValue) : undefined;
+      updateParams({
+        videoId: videoId || undefined,
+        start: form.state.values.start,
+        end: form.state.values.end,
+      });
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [urlValue, form.state.values.start, form.state.values.end, updateParams]);
+
+  // Extract timestamp from URL effect
+  useEffect(() => {
+    if (!urlValue) return;
+
+    const timestamp = extractTimestampFromUrl(urlValue);
+    if (timestamp !== null && !form.state.values.start) {
+      const timeString = secondsToTime(timestamp);
+      form.setFieldValue("start", timeString);
+    }
+  }, [urlValue, form]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Animated background */}
@@ -239,8 +311,7 @@ export default function Home() {
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl animate-pulse delay-1000" />
       </div>
-
-      <div className="relative z-10 container mx-auto px-4 py-16 max-w-4xl">
+      <div className="relative z-10 container mx-auto px-4 py-4 max-w-4xl">
         {/* Header */}
         <div className="text-center mb-12 space-y-4">
           <div className="flex items-center justify-center gap-3 mb-4">
@@ -258,12 +329,6 @@ export default function Home() {
 
         {/* Main Card */}
         <Card className="bg-card/80 backdrop-blur-xl border-border shadow-2xl">
-          <CardHeader>
-            <CardTitle className="text-2xl">Create Your Clip</CardTitle>
-            <CardDescription>
-              Enter a YouTube URL and specify the time range to clip
-            </CardDescription>
-          </CardHeader>
           <CardContent className="space-y-6">
             <form
               onSubmit={(e) => {
@@ -296,36 +361,6 @@ export default function Home() {
                         {getErrorMessage(field.state.meta.errors[0])}
                       </p>
                     )}
-                  </div>
-                )}
-              </form.Field>
-
-              {/* Video Name Input */}
-              <form.Field name="videoName">
-                {(field) => (
-                  <div className="space-y-2">
-                    <Label htmlFor="videoName">Video Name</Label>
-                    <Input
-                      id="videoName"
-                      type="text"
-                      placeholder="Enter a name for your clip..."
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      onBlur={field.handleBlur}
-                      disabled={isProcessing}
-                      className={cn(
-                        field.state.meta.errors.length > 0 &&
-                          "border-destructive"
-                      )}
-                    />
-                    {field.state.meta.errors.length > 0 && (
-                      <p className="text-sm text-destructive">
-                        {getErrorMessage(field.state.meta.errors[0])}
-                      </p>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      Auto-filled from video title. You can edit it.
-                    </p>
                   </div>
                 )}
               </form.Field>
@@ -486,10 +521,6 @@ export default function Home() {
                                     {videoId || "(invalid)"}
                                   </div>
                                   <div>
-                                    <strong>Video Name:</strong>{" "}
-                                    {values.videoName || "(empty)"}
-                                  </div>
-                                  <div>
                                     <strong>Start Time:</strong>{" "}
                                     {values.start || "(empty)"}
                                   </div>
@@ -559,115 +590,35 @@ export default function Home() {
             </form>
 
             {/* Video Metadata */}
-            <form.Subscribe selector={(state) => state.values.url}>
-              {(urlValue) => {
-                // Fetch metadata effect
-                useEffect(() => {
-                  const fetchMetadata = async () => {
-                    if (!urlValue) {
-                      setMetadata(null);
-                      return;
-                    }
-
-                    setIsFetchingMetadata(true);
-                    try {
-                      const res = await fetch(
-                        `/api/metadata?url=${encodeURIComponent(urlValue)}`
-                      );
-                      if (res.ok) {
-                        const data = await res.json();
-                        setMetadata(data);
-                        // Auto-populate video name from metadata title
-                        if (data.title && !form.state.values.videoName) {
-                          form.setFieldValue("videoName", data.title);
-                        }
-                        // Auto-set start time to 00:00:00 if not already set
-                        if (!form.state.values.start) {
-                          form.setFieldValue("start", "00:00:00");
-                        }
-                        // Auto-set end time to video duration if not already set
-                        if (!form.state.values.end && data.duration) {
-                          form.setFieldValue(
-                            "end",
-                            secondsToTime(data.duration)
-                          );
-                        }
-                      } else {
-                        setMetadata(null);
-                      }
-                    } catch (err) {
-                      console.error("Error fetching metadata:", err);
-                      setMetadata(null);
-                    } finally {
-                      setIsFetchingMetadata(false);
-                    }
-                  };
-
-                  const timeoutId = setTimeout(fetchMetadata, 1000);
-                  return () => clearTimeout(timeoutId);
-                }, [urlValue]);
-
-                // Update query params effect
-                useEffect(() => {
-                  const timeoutId = setTimeout(() => {
-                    const videoId = urlValue
-                      ? extractVideoIdFromUrl(urlValue)
-                      : undefined;
-                    const state = form.state;
-                    updateParams({
-                      videoId: videoId || undefined,
-                      start: state.values.start,
-                      end: state.values.end,
-                    });
-                  }, 500);
-
-                  return () => clearTimeout(timeoutId);
-                }, [urlValue]);
-
-                // Extract timestamp from URL effect
-                useEffect(() => {
-                  if (!urlValue) return;
-
-                  const timestamp = extractTimestampFromUrl(urlValue);
-                  if (timestamp !== null && !form.state.values.start) {
-                    const timeString = secondsToTime(timestamp);
-                    form.setFieldValue("start", timeString);
-                  }
-                }, [urlValue]);
-
-                if (!metadata || isProcessing) return null;
-
-                return (
-                  <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-                    <CardContent className="pt-6">
-                      <div className="flex items-start gap-4">
-                        {metadata.thumbnail && (
-                          <div className="flex-shrink-0">
-                            <img
-                              src={metadata.thumbnail}
-                              alt={metadata.title}
-                              className="w-40 h-[90px] object-cover rounded-lg shadow-md"
-                            />
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-foreground line-clamp-2 mb-1">
-                            {metadata.title}
-                          </h3>
-                          <p className="text-sm text-muted-foreground">
-                            {metadata.uploader}
-                          </p>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Duration: {Math.floor(metadata.duration / 60)}:
-                            {String(metadata.duration % 60).padStart(2, "0")}
-                          </p>
-                        </div>
+            {metadata && !isProcessing && (
+              <Card>
+                <CardContent>
+                  <div className="flex items-start gap-4">
+                    {metadata.thumbnail && (
+                      <div className="flex-shrink-0">
+                        <img
+                          src={metadata.thumbnail}
+                          alt={metadata.title}
+                          className="w-40 h-[90px] object-cover rounded-lg shadow-md"
+                        />
                       </div>
-                    </CardContent>
-                  </Card>
-                );
-              }}
-            </form.Subscribe>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-foreground line-clamp-2 mb-1">
+                        {metadata.title}
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        {metadata.uploader}
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Duration: {Math.floor(metadata.duration / 60)}:
+                        {String(metadata.duration % 60).padStart(2, "0")}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Error Alert */}
             {error && (

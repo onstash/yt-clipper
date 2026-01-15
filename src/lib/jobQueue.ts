@@ -4,6 +4,7 @@ import { Job, CreateJobInput } from "./types";
 import { extractVideoIdFromUrl } from "./validation";
 
 const JOBS_DIR = path.join(process.cwd(), "data", "jobs");
+const EXPIRY_DURATION = 48 * 60 * 60 * 1000; // 48 hours
 
 // Ensure jobs directory exists
 if (!fs.existsSync(JOBS_DIR)) {
@@ -12,7 +13,7 @@ if (!fs.existsSync(JOBS_DIR)) {
 
 /**
  * Generate a job ID from video URL and time range
- * Format: {videoId}_{startTime}_{endTime} (with : replaced by -)
+ * Format: {videoId}_clip_{startTime}_to_{endTime}
  */
 function generateJobId(url: string, start: string, end: string): string {
   const videoId = extractVideoIdFromUrl(url);
@@ -23,7 +24,7 @@ function generateJobId(url: string, start: string, end: string): string {
     // Fallback to timestamp-based ID if video ID extraction fails
     return `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
-  return `${videoId}_${startSafe}_${endSafe}`;
+  return `${videoId}_clip_${startSafe}_to_${endSafe}`;
 }
 
 /**
@@ -44,8 +45,10 @@ export function createJob(input: CreateJobInput): Job {
     startTime: input.start,
     endTime: input.end,
     progress: 0,
+    metadata: input.metadata,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    expiresAt: Date.now() + EXPIRY_DURATION,
   };
 
   saveJob(job);
@@ -123,13 +126,19 @@ export function deleteJob(jobId: string): boolean {
 }
 
 /**
- * Delete old jobs (older than 24 hours)
+ * Check if a job is expired
  */
-export function cleanupOldJobs(): void {
+export function isJobExpired(job: Job): boolean {
+  return Date.now() > job.expiresAt;
+}
+
+/**
+ * Get all jobs (for listing page)
+ */
+export function getAllJobs(): Job[] {
   try {
     const files = fs.readdirSync(JOBS_DIR);
-    const now = Date.now();
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+    const jobs: Job[] = [];
 
     for (const file of files) {
       if (!file.endsWith(".json")) continue;
@@ -137,13 +146,57 @@ export function cleanupOldJobs(): void {
       const filePath = path.join(JOBS_DIR, file);
       const data = fs.readFileSync(filePath, "utf-8");
       const job = JSON.parse(data) as Job;
+      jobs.push(job);
+    }
 
-      if (now - job.createdAt > maxAge) {
-        fs.unlinkSync(filePath);
-        console.log(`Deleted old job: ${job.id}`);
+    return jobs;
+  } catch (error) {
+    console.error("Error getting all jobs:", error);
+    return [];
+  }
+}
+
+/**
+ * Delete expired jobs and their associated files
+ */
+export function cleanupExpiredJobs(): void {
+  try {
+    const jobs = getAllJobs();
+
+    for (const job of jobs) {
+      if (isJobExpired(job)) {
+        // Delete job file
+        const jobPath = path.join(JOBS_DIR, `${job.id}.json`);
+        if (fs.existsSync(jobPath)) {
+          fs.unlinkSync(jobPath);
+        }
+
+        // Delete downloaded video file
+        if (job.downloadedFile) {
+          const downloadPath = path.join(
+            process.cwd(),
+            "public",
+            job.downloadedFile
+          );
+          if (fs.existsSync(downloadPath)) {
+            fs.unlinkSync(downloadPath);
+            console.log(`Deleted download: ${job.downloadedFile}`);
+          }
+        }
+
+        // Delete clipped file
+        if (job.clippedFile) {
+          const clipPath = path.join(process.cwd(), "public", job.clippedFile);
+          if (fs.existsSync(clipPath)) {
+            fs.unlinkSync(clipPath);
+            console.log(`Deleted clip: ${job.clippedFile}`);
+          }
+        }
+
+        console.log(`Cleaned up expired job: ${job.id}`);
       }
     }
   } catch (error) {
-    console.error("Error cleaning up old jobs:", error);
+    console.error("Error cleaning up expired jobs:", error);
   }
 }
