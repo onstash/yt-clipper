@@ -56,24 +56,14 @@ export default function LandingPage() {
             </div>
 
             {/* CTA Buttons */}
-            <div className="flex gap-4 justify-center">
+            <div className="flex justify-center">
               <Link to="/create">
                 <Button
                   size="lg"
-                  className="text-lg px-8 py-6 bg-gradient-to-r from-primary to-accent"
+                  className="text-lg px-8 py-6 bg-gradient-to-r from-primary to-accent cursor-pointer"
                 >
-                  <Sparkles className="mr-2 h-5 w-5" />
-                  Create Clip
-                </Button>
-              </Link>
-              <Link to="/jobs">
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="text-lg px-8 py-6"
-                >
-                  <LayoutList className="mr-2 h-5 w-5" />
-                  View Jobs
+                  <Sparkles className="h-5 w-5" />
+                  Get Started
                 </Button>
               </Link>
             </div>

@@ -3,6 +3,13 @@ import fs from "fs";
 import path from "path";
 import { getJob, saveJob, updateJobStatus, deleteJob } from "./jobQueue";
 import { extractVideoId } from "./utils";
+import { mockSpawn } from "./mockSpawn";
+import {
+  generateMockMetadata,
+  generateMockDownloadPath,
+  generateMockClipPath,
+  delay,
+} from "./mockData";
 
 const DOWNLOADS_DIR = path.join(process.cwd(), "public", "downloads");
 const CLIPS_DIR = path.join(process.cwd(), "public", "clips");
@@ -30,10 +37,17 @@ if (!fs.existsSync(CLIPS_DIR)) {
 /**
  * Check if required dependencies are installed
  */
-export async function checkDependencies(): Promise<{
+export async function checkDependencies(dryRun = false): Promise<{
   ytDlp: boolean;
   ffmpeg: boolean;
 }> {
+  if (dryRun) {
+    console.log(
+      "[DRY RUN] Skipping dependency check - assuming all dependencies available"
+    );
+    return { ytDlp: true, ffmpeg: true };
+  }
+
   const checkCommand = (cmd: string): Promise<boolean> => {
     return new Promise((resolve) => {
       const process = spawn("which", [cmd]);
@@ -58,9 +72,11 @@ export async function processVideo(jobId: string): Promise<void> {
     throw new Error(`Job ${jobId} not found`);
   }
 
+  const dryRun = job.dryRun || false;
+
   try {
     // Check dependencies
-    const deps = await checkDependencies();
+    const deps = await checkDependencies(dryRun);
     if (!deps.ytDlp) {
       throw new Error("yt-dlp is not installed. Please install it first.");
     }
@@ -69,9 +85,14 @@ export async function processVideo(jobId: string): Promise<void> {
     }
 
     // Download video
-    const downloadedFile = await downloadVideo(jobId, job.url);
+    const downloadedFile = await downloadVideo(
+      jobId,
+      job.url,
+      job.formatId,
+      dryRun
+    );
 
-    // Check if user wants full video (start=0, end=duration) - skip clipping
+    // Calculate duration to check if full video
     const startParts = job.startTime.split(":").map(Number);
     const endParts = job.endTime.split(":").map(Number);
     const startSeconds =
@@ -79,7 +100,7 @@ export async function processVideo(jobId: string): Promise<void> {
     const endSeconds = endParts[0] * 3600 + endParts[1] * 60 + endParts[2];
 
     // Fetch metadata to get actual duration
-    const metadata = await fetchVideoMetadata(job.url);
+    const metadata = await fetchVideoMetadata(job.url, dryRun);
     const isFullVideo =
       startSeconds === 0 &&
       metadata &&
@@ -98,7 +119,8 @@ export async function processVideo(jobId: string): Promise<void> {
         jobId,
         downloadedFile,
         job.startTime,
-        job.endTime
+        job.endTime,
+        dryRun
       );
     }
 
@@ -151,13 +173,7 @@ function getMetadataCachePath(videoId: string): string {
   return path.join(DOWNLOADS_DIR, `${videoId}.metadata.json`);
 }
 
-type VideoMetadata = {
-  title: string;
-  duration: number;
-  thumbnail: string;
-  uploader?: string;
-  channel?: string;
-};
+import { VideoMetadata, VideoFormat } from "./types";
 
 const videoIdMetadataCache = new Map<string, VideoMetadata>();
 
@@ -165,11 +181,47 @@ const videoIdMetadataCache = new Map<string, VideoMetadata>();
  * Fetch video metadata using yt-dlp (with caching)
  */
 export async function fetchVideoMetadata(
-  url: string
+  url: string,
+  dryRun = false
 ): Promise<VideoMetadata | null> {
   // Extract video ID for caching
   const videoId = extractVideoId(url);
   if (!videoId) return null;
+
+  // In dry run mode, return mock metadata immediately
+  if (dryRun) {
+    console.log(`[DRY RUN] Returning mock metadata for ${videoId}`);
+    const mockMetadata = generateMockMetadata(videoId);
+    // Add mock formats
+    return {
+      ...mockMetadata,
+      formats: [
+        {
+          formatId: "18",
+          label: "360p (MP4)",
+          filesize: 15 * 1024 * 1024,
+          isAudioOnly: false,
+          ext: "mp4",
+        },
+        {
+          formatId: "22",
+          label: "720p (MP4)",
+          filesize: 45 * 1024 * 1024,
+          isAudioOnly: false,
+          ext: "mp4",
+        },
+        {
+          formatId: "bestaudio",
+          label: "Audio Only",
+          filesize: 5 * 1024 * 1024,
+          isAudioOnly: true,
+          ext: "m4a",
+        },
+      ],
+      isDownloaded: false,
+    };
+  }
+
   const cachedMetadata = videoIdMetadataCache.get(videoId);
   if (cachedMetadata) return cachedMetadata;
 
@@ -203,12 +255,91 @@ export async function fetchVideoMetadata(
     ytDlp.on("close", (code: number | null) => {
       if (code === 0 && jsonData) {
         try {
-          const rawMetadata = JSON.parse(jsonData) as VideoMetadata;
-          const metadata = {
+          const rawMetadata = JSON.parse(jsonData);
+
+          // Parse formats
+          const formats: VideoFormat[] = [];
+          const rawFormats = rawMetadata.formats || [];
+
+          // Find best audio size
+          const audioFormats = rawFormats.filter(
+            (f: any) => f.vcodec === "none" && f.acodec !== "none"
+          );
+          const bestAudio = audioFormats.reduce((prev: any, current: any) => {
+            return (prev.filesize || 0) > (current.filesize || 0)
+              ? prev
+              : current;
+          }, {});
+          const bestAudioSize = bestAudio.filesize || 0;
+
+          // 1. Audio Only Option
+          if (bestAudioSize > 0) {
+            formats.push({
+              formatId: bestAudio.format_id || "bestaudio",
+              label: "Audio Only",
+              filesize: bestAudioSize,
+              isAudioOnly: true,
+              ext: bestAudio.ext || "m4a",
+            });
+          }
+
+          // 2. Video Formats
+          // Group by resolution
+          const resolutionMap = new Map<string, any>();
+
+          rawFormats.forEach((f: any) => {
+            if (f.vcodec !== "none" && f.height) {
+              const height = f.height;
+              const resKey = `${height}p`;
+
+              // Keep the format with the highest bitrate/filesize for this resolution
+              if (
+                !resolutionMap.has(resKey) ||
+                (f.filesize || 0) > (resolutionMap.get(resKey).filesize || 0)
+              ) {
+                resolutionMap.set(resKey, f);
+              }
+            }
+          });
+
+          // Sort resolutions descending
+          const sortedResolutions = Array.from(resolutionMap.keys()).sort(
+            (a, b) => {
+              return parseInt(b) - parseInt(a);
+            }
+          );
+
+          sortedResolutions.forEach((res) => {
+            const f = resolutionMap.get(res);
+            // Estimate size: video size + audio size (unless it's a pre-merged format like 18 or 22)
+            const videoSize = f.filesize || f.filesize_approx || 0;
+            const isMerged = f.acodec !== "none";
+            const totalSize = isMerged ? videoSize : videoSize + bestAudioSize;
+
+            // Construct format ID for yt-dlp
+            // If it's video-only stream, we request "video_id+bestaudio"
+            const formatId = isMerged
+              ? f.format_id
+              : `${f.format_id}+bestaudio`;
+
+            formats.push({
+              formatId: formatId,
+              label: `${res} (${f.ext})`,
+              filesize: totalSize,
+              isAudioOnly: false,
+              ext: f.ext,
+            });
+          });
+
+          const isDownloaded = !!findExistingVideo(videoId);
+
+          const metadata: VideoMetadata = {
             title: rawMetadata.title || "Unknown",
             duration: rawMetadata.duration || 0,
             thumbnail: rawMetadata.thumbnail || "",
             uploader: rawMetadata.uploader || rawMetadata.channel || "Unknown",
+            isDownloaded,
+            formats: formats,
           };
           videoIdMetadataCache.set(videoId, metadata);
 
@@ -243,12 +374,31 @@ export async function fetchVideoMetadata(
 /**
  * Download video using yt-dlp
  */
-async function downloadVideo(jobId: string, url: string): Promise<string> {
+async function downloadVideo(
+  jobId: string,
+  url: string,
+  formatId?: string,
+  dryRun = false
+): Promise<string> {
   updateJobStatus(jobId, "downloading", { progress: 0 });
 
   const videoId = extractVideoId(url);
   if (!videoId) {
     throw new Error("Could not extract video ID from URL");
+  }
+
+  // In dry run mode, simulate download
+  if (dryRun) {
+    console.log(`[DRY RUN] Simulating download for ${videoId}`);
+    const mockPath = generateMockDownloadPath(videoId);
+
+    // Simulate progress updates
+    for (let progress = 0; progress <= 50; progress += 10) {
+      await delay(200);
+      updateJobStatus(jobId, "downloading", { progress });
+    }
+
+    return mockPath;
   }
 
   // Check if video already exists in any format
@@ -266,9 +416,13 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
   );
 
   return new Promise((resolve, reject) => {
-    const ytDlp = spawn(
+    const spawnFn = dryRun ? mockSpawn : spawn;
+    const formatArgs = formatId
+      ? ["-f", formatId]
+      : ["-f", "bestvideo+bestaudio"];
+    const ytDlp = spawnFn(
       "yt-dlp",
-      ["-f", "bestvideo+bestaudio", "-o", outputTemplate, "--progress", url],
+      [...formatArgs, "-o", outputTemplate, "--progress", url],
       {
         env: {
           ...process.env,
@@ -279,7 +433,7 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
 
     let downloadedFile = "";
 
-    ytDlp.stdout.on("data", (data: Buffer) => {
+    ytDlp.stdout?.on("data", (data: Buffer) => {
       const output = data.toString();
       console.log(`yt-dlp: ${output}`);
       // Parse progress percentage from yt-dlp output
@@ -306,7 +460,7 @@ async function downloadVideo(jobId: string, url: string): Promise<string> {
       }
     });
 
-    ytDlp.stderr.on("data", (data: Buffer) => {
+    ytDlp.stderr?.on("data", (data: Buffer) => {
       console.error(`yt-dlp error: ${data}`);
     });
 
@@ -346,7 +500,8 @@ async function clipVideo(
   jobId: string,
   inputFile: string, // Can be .webm, .mkv, .mp4, etc.
   startTime: string,
-  endTime: string
+  endTime: string,
+  dryRun = false
 ): Promise<string> {
   updateJobStatus(jobId, "clipping", { progress: 50 });
 
@@ -357,11 +512,30 @@ async function clipVideo(
   const startSafe = startTime.replace(/:/g, "-");
   const endSafe = endTime.replace(/:/g, "-");
 
-  // Always output to MP4, regardless of input format
+  // Output format should match input format for valid containers with copy codec
+  // Or fallback to MP4 if compatible, but safest is same extension or specific container
+  // For simplicity with copy codec, we try to preserve extension or default to .mp4
+  const inputExt = path.extname(inputFile);
+
   const outputFile = path.join(
     CLIPS_DIR,
-    `${videoId}_clip_${startSafe}_to_${endSafe}.mp4`
+    `${videoId}_clip_${startSafe}_to_${endSafe}${inputExt}`
   );
+
+  // In dry run mode, simulate clipping
+  if (dryRun) {
+    console.log(`[DRY RUN] Simulating clip for ${videoId}`);
+    const videoIdOnly = videoId.replace("_download", "");
+    const mockPath = generateMockClipPath(videoIdOnly, startTime, endTime);
+
+    // Simulate progress updates
+    for (let progress = 50; progress <= 100; progress += 10) {
+      await delay(300);
+      updateJobStatus(jobId, "clipping", { progress });
+    }
+
+    return mockPath;
+  }
 
   // Check if clip already exists
   if (fs.existsSync(outputFile)) {
@@ -387,34 +561,29 @@ async function clipVideo(
       durationMinutes
     ).padStart(2, "0")}:${String(durationSecs).padStart(2, "0")}`;
 
-    const ffmpeg = spawn("ffmpeg", [
+    const spawnFn = dryRun ? mockSpawn : spawn;
+    const ffmpeg = spawnFn("ffmpeg", [
       "-ss",
       startTime, // Seek to start time (fast seek before input)
       "-i",
       inputFile,
       "-t",
-      duration, // Duration of clip (not end time, since -ss is before -i)
-      "-c:v",
-      "libx264", // H.264 video codec
-      "-preset",
-      "veryslow", // Highest quality preset
-      "-crf",
-      "18", // Near-lossless quality
-      "-c:a",
-      "aac", // AAC audio codec
-      "-b:a",
-      "320k", // Maximum audio bitrate
+      duration, // Duration of clip
+      "-c",
+      "copy", // Stream copy (no re-encoding)
+      "-avoid_negative_ts",
+      "make_zero", // Ensure timestamps start at 0
       "-movflags",
-      "+faststart", // Enable streaming
+      "+faststart", // Enable streaming (if mp4/mov)
       "-y", // Overwrite output file
       outputFile,
     ]);
 
-    ffmpeg.stdout.on("data", (data: Buffer) => {
+    ffmpeg.stdout?.on("data", (data: Buffer) => {
       console.log(`ffmpeg: ${data}`);
     });
 
-    ffmpeg.stderr.on("data", (data: Buffer) => {
+    ffmpeg.stderr?.on("data", (data: Buffer) => {
       const output = data.toString();
       console.log(`ffmpeg: ${output}`);
 

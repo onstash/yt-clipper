@@ -7,7 +7,7 @@ export const timeRegex = /^(?:([0-1]?\d|2[0-3]):)?([0-5]?\d):([0-5]\d)$/;
 // Matches all common YouTube URL formats with optional query parameters
 // Supports: watch?v=, embed/, v/, /live/, /shorts/, and youtu.be/ formats
 export const youtubeUrlRegex =
-  /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|live\/|shorts\/)|youtu\.be\/)[\w-]{11}(\?.*)?$/;
+  /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|embed\/|v\/|live\/|shorts\/)|youtu\.be\/)[\w-]{11}([?&].*)?$/;
 
 /**
  * Normalize time string to HH:MM:SS format
@@ -87,6 +87,7 @@ export function extractTimestampFromUrl(url: string): number | null {
 export const inputSchema = z
   .object({
     url: z.string().regex(youtubeUrlRegex, "Must be a valid YouTube URL"),
+    formatId: z.string().optional(),
     start: z
       .string()
       .regex(timeRegex, "Start time must be mm:ss or hh:mm:ss")

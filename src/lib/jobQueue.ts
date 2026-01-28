@@ -49,6 +49,7 @@ export function createJob(input: CreateJobInput): Job {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     expiresAt: Date.now() + EXPIRY_DURATION,
+    dryRun: input.dryRun,
   };
 
   saveJob(job);

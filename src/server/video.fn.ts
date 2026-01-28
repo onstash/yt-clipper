@@ -9,7 +9,6 @@ import {
   getAllJobs,
 } from "@/lib/jobQueue";
 import { processVideo, fetchVideoMetadata } from "@/lib/videoProcessor";
-import type { Job } from "@/lib/types";
 import fs from "fs";
 import path from "path";
 
@@ -17,15 +16,25 @@ import path from "path";
 // Process Video (replaces POST /api/process)
 // =============================================================================
 
+const processInputSchema = inputSchema.merge(
+  z.object({
+    dryRun: z.boolean().optional(),
+  })
+);
+
 export const processVideoFn = createServerFn({ method: "POST" })
-  .inputValidator(inputSchema)
+  .inputValidator(processInputSchema)
   .handler(async ({ data }) => {
     // Fetch video metadata first
-    const metadata = await fetchVideoMetadata(data.url);
+    const metadata = await fetchVideoMetadata(data.url, data.dryRun);
 
     const job = createJob({
-      ...data,
+      url: data.url,
+      formatId: data.formatId,
+      start: data.start,
+      end: data.end,
       metadata: metadata || undefined,
+      dryRun: data.dryRun,
     });
 
     // Start processing asynchronously (don't await)
@@ -85,19 +94,15 @@ export const cancelJobFn = createServerFn({ method: "POST" })
 
 const metadataSchema = z.object({
   url: z.string().url("URL is required"),
+  dryRun: z.boolean().optional(),
 });
 
-export type VideoMetadata = {
-  title: string;
-  duration: number;
-  thumbnail: string;
-  uploader: string;
-};
+import type { Job, VideoMetadata } from "@/lib/types";
 
 export const getMetadataFn = createServerFn({ method: "GET" })
   .inputValidator(metadataSchema)
   .handler(async ({ data }): Promise<VideoMetadata | null> => {
-    return fetchVideoMetadata(data.url);
+    return fetchVideoMetadata(data.url, data.dryRun);
   });
 
 // =============================================================================

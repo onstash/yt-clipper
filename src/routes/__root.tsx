@@ -7,6 +7,8 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import appCss from "@/styles/globals.css?url";
+import { DryRunProvider } from "@/contexts/DryRunContext";
+import { DryRunToggle } from "@/components/DryRunToggle";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -29,9 +31,11 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <RootDocument>
-      <Outlet />
-    </RootDocument>
+    <DryRunProvider>
+      <RootDocument>
+        <Outlet />
+      </RootDocument>
+    </DryRunProvider>
   );
 }
 
@@ -42,6 +46,9 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
         <HeadContent />
       </head>
       <body>
+        <div className="fixed top-4 right-4 z-50">
+          <DryRunToggle />
+        </div>
         {children}
         <Scripts />
       </body>

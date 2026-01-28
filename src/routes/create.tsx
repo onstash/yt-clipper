@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useForm } from "@tanstack/react-form";
 import { z } from "zod";
@@ -7,19 +8,16 @@ import {
   extractVideoIdFromUrl,
   extractTimestampFromUrl,
   secondsToTime,
+  youtubeUrlRegex,
+  timeRegex,
+  timeToSeconds,
 } from "@/lib/validation";
-import { Job } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { Job, VideoMetadata } from "@/lib/types";
+import { cn, formatBytes } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -48,12 +46,15 @@ import {
   cancelJobFn,
   getMetadataFn,
 } from "@/server/video.fn";
+import { useDryRun } from "@/contexts/DryRunContext";
+import { DryRunBadge } from "@/components/DryRunBadge";
 
 // Search params schema for type-safe URL params
 const searchSchema = z.object({
   videoId: z.string().optional(),
   start: z.string().optional(),
   end: z.string().optional(),
+  formatId: z.string().optional(),
   jobId: z.string().optional(),
 });
 
@@ -67,6 +68,7 @@ const STORAGE_KEY = "yt-clipper-jobId";
 function Home() {
   const search = Route.useSearch();
   const navigate = useNavigate();
+  const { isDryRun } = useDryRun();
 
   // Job state
   const [job, setJob] = useState<Job | null>(null);
@@ -74,12 +76,8 @@ function Home() {
   const [error, setError] = useState<string | null>(null);
 
   // Metadata state
-  const [metadata, setMetadata] = useState<{
-    title: string;
-    duration: number;
-    thumbnail: string;
-    uploader: string;
-  } | null>(null);
+  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+  const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [isFetchingMetadata, setIsFetchingMetadata] = useState(false);
 
   // Helper to update URL params
@@ -106,9 +104,7 @@ function Home() {
         : "",
       start: search.start || "",
       end: search.end || "",
-    },
-    validators: {
-      onChange: inputSchema,
+      formatId: search.formatId || "",
     },
     onSubmit: async ({ value }) => {
       console.log(value);
@@ -117,7 +113,9 @@ function Home() {
       setJob(null);
 
       try {
-        const result = await processVideoFn({ data: value });
+        const result = await processVideoFn({
+          data: { ...value, dryRun: isDryRun },
+        });
         setJob(result.job);
         updateParams({ jobId: result.jobId });
         localStorage.setItem(STORAGE_KEY, result.jobId);
@@ -130,26 +128,6 @@ function Home() {
       }
     },
   });
-
-  // Sync form with query params on mount (with validation)
-  useEffect(() => {
-    if (search.videoId || search.start || search.end) {
-      const reconstructedUrl = search.videoId
-        ? `https://www.youtube.com/watch?v=${search.videoId}`
-        : "";
-      const result = inputSchema.safeParse({
-        url: reconstructedUrl,
-        start: search.start || "",
-        end: search.end || "",
-      });
-
-      if (!result.success) {
-        // Invalid params, clear them
-        updateParams({ videoId: undefined, start: undefined, end: undefined });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Load jobId from localStorage or URL params on mount
   useEffect(() => {
@@ -242,67 +220,43 @@ function Home() {
     return err.message || "";
   };
 
-  // Fetch metadata effect
-  const urlValue = form.state.values.url;
-  useEffect(() => {
-    const fetchMetadata = async () => {
-      if (!urlValue) {
-        setMetadata(null);
-        return;
-      }
+  // Fetch metadata handler
+  const handleFetchMetadata = async () => {
+    // Get current value directly from form state
 
-      setIsFetchingMetadata(true);
-      try {
-        const data = await getMetadataFn({ data: { url: urlValue } });
-        if (data) {
-          setMetadata(data);
-          // Auto-set start time to 00:00:00 if not already set
-          if (!form.state.values.start) {
-            form.setFieldValue("start", "00:00:00");
-          }
-          // Auto-set end time to video duration if not already set
-          if (!form.state.values.end && data.duration) {
-            form.setFieldValue("end", secondsToTime(data.duration));
-          }
-        } else {
-          setMetadata(null);
-        }
-      } catch (err) {
-        console.error("Error fetching metadata:", err);
-        setMetadata(null);
-      } finally {
-        setIsFetchingMetadata(false);
-      }
-    };
-
-    const timeoutId = setTimeout(fetchMetadata, 1000);
-    return () => clearTimeout(timeoutId);
-  }, [urlValue, form]);
-
-  // Update query params effect
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      const videoId = urlValue ? extractVideoIdFromUrl(urlValue) : undefined;
-      updateParams({
-        videoId: videoId || undefined,
-        start: form.state.values.start,
-        end: form.state.values.end,
-      });
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [urlValue, form.state.values.start, form.state.values.end, updateParams]);
-
-  // Extract timestamp from URL effect
-  useEffect(() => {
-    if (!urlValue) return;
-
-    const timestamp = extractTimestampFromUrl(urlValue);
-    if (timestamp !== null && !form.state.values.start) {
-      const timeString = secondsToTime(timestamp);
-      form.setFieldValue("start", timeString);
+    if (!currentVideoId) {
+      setMetadata(null);
+      setIsFetchingMetadata(false);
+      return;
     }
-  }, [urlValue, form]);
+    const currentUrl = form.getFieldValue("url");
+
+    setIsFetchingMetadata(true);
+
+    try {
+      const data = await getMetadataFn({
+        data: { url: currentUrl, dryRun: isDryRun },
+      });
+      if (data) {
+        setMetadata(data);
+        // Auto-set start time to 00:00:00 if not already set
+        if (!form.getFieldValue("start")) {
+          form.setFieldValue("start", "00:00:00");
+        }
+        // Auto-set end time to video duration if not already set
+        if (!form.getFieldValue("end") && data.duration) {
+          form.setFieldValue("end", secondsToTime(data.duration));
+        }
+      } else {
+        setMetadata(null);
+      }
+    } catch (err) {
+      console.error("Error fetching metadata:", err);
+      setMetadata(null);
+    } finally {
+      setIsFetchingMetadata(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -313,19 +267,21 @@ function Home() {
       </div>
       <div className="relative z-10 container mx-auto px-4 py-4 max-w-4xl">
         {/* Header */}
-        <div className="text-center mb-12 space-y-4">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="p-3 bg-gradient-to-br from-primary to-accent rounded-2xl shadow-lg">
-              <Scissors className="w-8 h-8 text-primary-foreground" />
-            </div>
+        <div className="text-center mb-12 space-y-4 flex flex-row justify-center items-center gap-6">
+          <div className="p-3 bg-gradient-to-br from-primary to-accent rounded-2xl shadow-lg">
+            <Scissors className="w-8 h-8 text-primary-foreground" />
           </div>
           <h1 className="text-5xl font-bold bg-gradient-to-r from-primary via-secondary to-accent bg-clip-text text-transparent">
             YouTube Clipper
           </h1>
-          <p className="text-muted-foreground text-lg">
-            Download and clip YouTube videos with precision
-          </p>
         </div>
+
+        {/* Dry Run Badge */}
+        {isDryRun && (
+          <div className="mb-6">
+            <DryRunBadge />
+          </div>
+        )}
 
         {/* Main Card */}
         <Card className="bg-card/80 backdrop-blur-xl border-border shadow-2xl">
@@ -339,86 +295,265 @@ function Home() {
               className="space-y-6"
             >
               {/* URL Input */}
-              <form.Field name="url">
+              <form.Field
+                name="url"
+                validators={{
+                  onBlur: ({ value }) => {
+                    const result = z
+                      .string()
+                      .regex(youtubeUrlRegex, "Must be a valid YouTube URL")
+                      .safeParse(value);
+                    if (!result.success) {
+                      return result.error.issues[0]?.message || "Invalid URL";
+                    }
+                    return undefined;
+                  },
+                }}
+              >
                 {(field) => (
                   <div className="space-y-2">
                     <Label htmlFor="url">YouTube URL</Label>
-                    <Input
-                      id="url"
-                      type="text"
-                      placeholder="https://www.youtube.com/watch?v=..."
-                      value={field.state.value}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      onBlur={field.handleBlur}
-                      disabled={isProcessing}
-                      className={cn(
-                        field.state.meta.errors.length > 0 &&
-                          "border-destructive"
+                    <div className="relative">
+                      <Input
+                        id="url"
+                        type="text"
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        value={field.state.value}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          field.handleChange(val);
+
+                          // Reset metadata if URL is invalid/cleared
+                          const videoId = val
+                            ? extractVideoIdFromUrl(val)
+                            : null;
+                          if (!videoId) {
+                            setMetadata(null);
+                            setCurrentVideoId(null);
+                            return;
+                          }
+
+                          if (videoId !== currentVideoId) {
+                            setCurrentVideoId(videoId);
+                          }
+
+                          // Auto-fill timestamp if present and start time is empty
+                          const timestamp = extractTimestampFromUrl(val);
+                          if (timestamp !== null && !form.state.values.start) {
+                            form.setFieldValue(
+                              "start",
+                              secondsToTime(timestamp)
+                            );
+                          }
+                        }}
+                        onBlur={field.handleBlur}
+                        disabled={isProcessing}
+                        className={cn(
+                          field.state.meta.errors.length > 0 &&
+                            "border-destructive",
+                          isFetchingMetadata && "pr-10"
+                        )}
+                      />
+                      {isFetchingMetadata && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        </div>
                       )}
-                    />
-                    {field.state.meta.errors.length > 0 && (
-                      <p className="text-sm text-destructive">
-                        {getErrorMessage(field.state.meta.errors[0])}
-                      </p>
-                    )}
+                    </div>
+                    <AnimatePresence mode="wait">
+                      {field.state.meta.errors.length > 0 && (
+                        <motion.p
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -10 }}
+                          className="text-sm text-destructive font-medium"
+                        >
+                          {getErrorMessage(field.state.meta.errors[0])}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
               </form.Field>
 
-              {/* Time Inputs */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <form.Field name="start">
+              {/* Format Selection */}
+              {metadata && metadata.formats && metadata.formats.length > 0 && (
+                <form.Field name="formatId">
                   {(field) => (
                     <div className="space-y-2">
-                      <Label htmlFor="start">
-                        Start Time (mm:ss or hh:mm:ss)
-                      </Label>
-                      <Input
-                        id="start"
-                        type="text"
-                        placeholder="00:30 or 00:00:30"
-                        value={field.state.value}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        onBlur={field.handleBlur}
-                        disabled={isProcessing}
-                        className={cn(
-                          field.state.meta.errors.length > 0 &&
-                            "border-destructive"
-                        )}
-                      />
-                      {field.state.meta.errors.length > 0 && (
-                        <p className="text-sm text-destructive">
-                          {getErrorMessage(field.state.meta.errors[0])}
-                        </p>
-                      )}
+                      <Label htmlFor="formatId">Video Format</Label>
+                      <div className="relative">
+                        <select
+                          id="formatId"
+                          className={cn(
+                            "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 appearance-none",
+                            !field.state.value && "text-muted-foreground"
+                          )}
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          disabled={isProcessing}
+                        >
+                          <option value="">Best Quality (Auto)</option>
+                          {metadata.formats.map((format) => (
+                            <option
+                              key={format.formatId}
+                              value={format.formatId}
+                            >
+                              {format.label} -{" "}
+                              {format.filesize > 0
+                                ? formatBytes(format.filesize)
+                                : "Unknown size"}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                          <Video className="h-4 w-4" />
+                        </div>
+                      </div>
                     </div>
                   )}
                 </form.Field>
+              )}
 
-                <form.Field name="end">
-                  {(field) => (
-                    <div className="space-y-2">
-                      <Label htmlFor="end">End Time (mm:ss or hh:mm:ss)</Label>
-                      <Input
-                        id="end"
-                        type="text"
-                        placeholder="01:30 or 00:01:30"
-                        value={field.state.value}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        onBlur={field.handleBlur}
-                        disabled={isProcessing}
-                        className={cn(
-                          field.state.meta.errors.length > 0 &&
-                            "border-destructive"
-                        )}
-                      />
-                      {field.state.meta.errors.length > 0 && (
-                        <p className="text-sm text-destructive">
-                          {getErrorMessage(field.state.meta.errors[0])}
-                        </p>
-                      )}
-                    </div>
-                  )}
+              {/* Time Inputs */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <form.Field
+                  name="start"
+                  validators={{
+                    onBlur: ({ value }) => {
+                      const result = z
+                        .string()
+                        .regex(
+                          timeRegex,
+                          "Start time must be mm:ss or hh:mm:ss"
+                        )
+                        .safeParse(value);
+                      if (!result.success) {
+                        return (
+                          result.error.issues[0]?.message ||
+                          "Invalid start time"
+                        );
+                      }
+                      return undefined;
+                    },
+                  }}
+                >
+                  {(field) => {
+                    const urlField = form.getFieldValue("url");
+                    const isUrlValid =
+                      urlField && youtubeUrlRegex.test(urlField);
+                    return (
+                      <div className="space-y-2">
+                        <Label
+                          htmlFor="start"
+                          className={cn(!isUrlValid && "text-muted-foreground")}
+                        >
+                          Start Time (mm:ss or hh:mm:ss)
+                        </Label>
+                        <Input
+                          id="start"
+                          type="text"
+                          placeholder="00:30 or 00:00:30"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                          disabled={isProcessing || !isUrlValid}
+                          className={cn(
+                            field.state.meta.errors.length > 0 &&
+                              "border-destructive"
+                          )}
+                        />
+                        <AnimatePresence mode="wait">
+                          {field.state.meta.errors.length > 0 && (
+                            <motion.p
+                              initial={{ opacity: 0, y: -10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -10 }}
+                              className="text-sm text-destructive font-medium"
+                            >
+                              {getErrorMessage(field.state.meta.errors[0])}
+                            </motion.p>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  }}
+                </form.Field>
+
+                <form.Field
+                  name="end"
+                  validators={{
+                    onBlur: ({ value }) => {
+                      const result = z
+                        .string()
+                        .regex(timeRegex, "End time must be mm:ss or hh:mm:ss")
+                        .safeParse(value);
+                      if (!result.success) {
+                        return (
+                          result.error.issues[0]?.message || "Invalid end time"
+                        );
+                      }
+                      return undefined;
+                    },
+                    onChange: ({ value, fieldApi }) => {
+                      // Cross-field validation: end must be after start
+                      const startValue = fieldApi.form.getFieldValue("start");
+                      if (
+                        value &&
+                        startValue &&
+                        timeRegex.test(value) &&
+                        timeRegex.test(startValue)
+                      ) {
+                        const endSeconds = timeToSeconds(value);
+                        const startSeconds = timeToSeconds(startValue);
+                        if (endSeconds <= startSeconds) {
+                          return "End time must be after start time";
+                        }
+                      }
+                      return undefined;
+                    },
+                  }}
+                >
+                  {(field) => {
+                    const urlField = form.getFieldValue("url");
+                    const isUrlValid =
+                      urlField && youtubeUrlRegex.test(urlField);
+                    return (
+                      <div className="space-y-2">
+                        <Label
+                          htmlFor="end"
+                          className={cn(!isUrlValid && "text-muted-foreground")}
+                        >
+                          End Time (mm:ss or hh:mm:ss)
+                        </Label>
+                        <Input
+                          id="end"
+                          type="text"
+                          placeholder="01:30 or 00:01:30"
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          onBlur={field.handleBlur}
+                          disabled={isProcessing || !isUrlValid}
+                          className={cn(
+                            field.state.meta.errors.length > 0 &&
+                              "border-destructive"
+                          )}
+                        />
+                        <AnimatePresence mode="wait">
+                          {field.state.meta.errors.length > 0 && (
+                            <motion.p
+                              initial={{ opacity: 0, y: -10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -10 }}
+                              className="text-sm text-destructive font-medium"
+                            >
+                              {getErrorMessage(field.state.meta.errors[0])}
+                            </motion.p>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  }}
                 </form.Field>
               </div>
 
@@ -441,32 +576,58 @@ function Home() {
               {/* Submit/Cancel Buttons */}
               <div className="flex gap-3">
                 <form.Subscribe
-                  selector={(state) => [state.canSubmit, state.isSubmitting]}
+                  selector={(state) => [
+                    state.canSubmit,
+                    state.isSubmitting,
+                    state.errors,
+                  ]}
                 >
-                  {([canSubmit, isFormSubmitting]) => (
-                    <Button
-                      type="submit"
-                      disabled={
-                        !canSubmit ||
-                        isSubmitting ||
-                        isProcessing ||
-                        isFormSubmitting
-                      }
-                      className="flex-1 bg-gradient-to-r from-primary to-accent hover:opacity-90 font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02] shadow-lg"
-                    >
-                      {isSubmitting || isProcessing ? (
-                        <>
-                          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                          Processing...
-                        </>
-                      ) : (
-                        <>
-                          <Scissors className="mr-2 h-5 w-5" />
-                          Clip Video
-                        </>
-                      )}
-                    </Button>
-                  )}
+                  {([canSubmit, isFormSubmitting, formErrors]) => {
+                    const hasErrors =
+                      (Array.isArray(formErrors) && formErrors.length > 0) ||
+                      !!form.state.fieldMeta.url?.errors?.length ||
+                      !!form.state.fieldMeta.start?.errors?.length ||
+                      !!form.state.fieldMeta.end?.errors?.length;
+
+                    return (
+                      <Button
+                        type={metadata ? "submit" : "button"}
+                        onClick={(e) => {
+                          if (!metadata) {
+                            e.preventDefault();
+                            handleFetchMetadata();
+                          }
+                        }}
+                        disabled={Boolean(
+                          isSubmitting ||
+                            isProcessing ||
+                            (metadata && isFormSubmitting)
+                        )}
+                        className="flex-1 bg-gradient-to-r from-primary to-accent hover:opacity-90 font-semibold py-6 text-lg transition-all duration-300 hover:scale-[1.02] shadow-lg"
+                      >
+                        {isSubmitting || isProcessing || isFetchingMetadata ? (
+                          <>
+                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                            {isFetchingMetadata
+                              ? "Fetching Metadata..."
+                              : "Processing..."}
+                          </>
+                        ) : !metadata ? (
+                          <>
+                            <Download className="mr-2 h-5 w-5" />
+                            Fetch Metadata
+                          </>
+                        ) : (
+                          <>
+                            <Scissors className="mr-2 h-5 w-5" />
+                            {metadata.isDownloaded
+                              ? "Clip Video"
+                              : "Download & Clip Video"}
+                          </>
+                        )}
+                      </Button>
+                    );
+                  }}
                 </form.Subscribe>
 
                 {isProcessing && (
@@ -676,36 +837,6 @@ function Home() {
             )}
           </CardContent>
         </Card>
-
-        {/* Features */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
-          {[
-            {
-              icon: Video,
-              title: "High Quality",
-              desc: "Best video + audio quality",
-            },
-            {
-              icon: Scissors,
-              title: "Precise Clipping",
-              desc: "Frame-accurate cuts",
-            },
-            {
-              icon: Download,
-              title: "Fast Downloads",
-              desc: "Optimized processing",
-            },
-          ].map((feature, i) => (
-            <div
-              key={i}
-              className="p-6 bg-card/50 backdrop-blur-sm rounded-xl border border-border hover:border-primary/50 transition-all duration-300 hover:scale-105 shadow-md"
-            >
-              <feature.icon className="h-8 w-8 text-primary mb-3" />
-              <h3 className="font-semibold mb-2">{feature.title}</h3>
-              <p className="text-sm text-muted-foreground">{feature.desc}</p>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
