@@ -19,7 +19,7 @@ import path from "path";
 const processInputSchema = inputSchema.merge(
   z.object({
     dryRun: z.boolean().optional(),
-  })
+  }),
 );
 
 export const processVideoFn = createServerFn({ method: "POST" })
@@ -38,6 +38,9 @@ export const processVideoFn = createServerFn({ method: "POST" })
     });
 
     // Start processing asynchronously (don't await)
+    console.log(
+      `[processVideoFn] Job created: ${job.id}, Format: ${data.formatId || "Auto"}`,
+    );
     processVideo(job.id).catch((error) => {
       console.error(`Background processing error for job ${job.id}:`, error);
     });
@@ -127,7 +130,7 @@ export const getAllJobsFn = createServerFn({ method: "GET" }).handler(
       }
       return b.createdAt - a.createdAt;
     });
-  }
+  },
 );
 
 // =============================================================================
@@ -189,7 +192,7 @@ export const getDownloadsFn = createServerFn({ method: "GET" }).handler(
 
     // Combine and sort by most recent
     return [...downloads, ...clips].sort((a, b) => b.createdAt - a.createdAt);
-  }
+  },
 );
 
 // =============================================================================

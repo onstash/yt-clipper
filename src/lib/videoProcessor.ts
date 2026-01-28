@@ -43,7 +43,7 @@ export async function checkDependencies(dryRun = false): Promise<{
 }> {
   if (dryRun) {
     console.log(
-      "[DRY RUN] Skipping dependency check - assuming all dependencies available"
+      "[DRY RUN] Skipping dependency check - assuming all dependencies available",
     );
     return { ytDlp: true, ffmpeg: true };
   }
@@ -89,7 +89,7 @@ export async function processVideo(jobId: string): Promise<void> {
       jobId,
       job.url,
       job.formatId,
-      dryRun
+      dryRun,
     );
 
     // Calculate duration to check if full video
@@ -120,7 +120,7 @@ export async function processVideo(jobId: string): Promise<void> {
         downloadedFile,
         job.startTime,
         job.endTime,
-        dryRun
+        dryRun,
       );
     }
 
@@ -182,7 +182,7 @@ const videoIdMetadataCache = new Map<string, VideoMetadata>();
  */
 export async function fetchVideoMetadata(
   url: string,
-  dryRun = false
+  dryRun = false,
 ): Promise<VideoMetadata | null> {
   // Extract video ID for caching
   const videoId = extractVideoId(url);
@@ -263,7 +263,7 @@ export async function fetchVideoMetadata(
 
           // Find best audio size
           const audioFormats = rawFormats.filter(
-            (f: any) => f.vcodec === "none" && f.acodec !== "none"
+            (f: any) => f.vcodec === "none" && f.acodec !== "none",
           );
           const bestAudio = audioFormats.reduce((prev: any, current: any) => {
             return (prev.filesize || 0) > (current.filesize || 0)
@@ -306,7 +306,7 @@ export async function fetchVideoMetadata(
           const sortedResolutions = Array.from(resolutionMap.keys()).sort(
             (a, b) => {
               return parseInt(b) - parseInt(a);
-            }
+            },
           );
 
           sortedResolutions.forEach((res) => {
@@ -378,7 +378,7 @@ async function downloadVideo(
   jobId: string,
   url: string,
   formatId?: string,
-  dryRun = false
+  dryRun = false,
 ): Promise<string> {
   updateJobStatus(jobId, "downloading", { progress: 0 });
 
@@ -401,18 +401,31 @@ async function downloadVideo(
     return mockPath;
   }
 
+  console.log(
+    `[downloadVideo] Starting download for ${videoId} with format: ${formatId || "Auto"}`,
+  );
+
   // Check if video already exists in any format
-  const existingVideo = findExistingVideo(videoId);
+  // If a specific format is requested, we force download to ensure quality match
+  // We only use cache if no specific format is requested (Auto)
+  const shouldCheckCache = !formatId;
+  const existingVideo = shouldCheckCache ? findExistingVideo(videoId) : null;
 
   if (existingVideo) {
-    console.log(`Video already downloaded: ${existingVideo}`);
+    console.log(
+      `[downloadVideo] Video already downloaded and cache allowed: ${existingVideo}`,
+    );
     updateJobStatus(jobId, "downloading", { progress: 50 });
     return existingVideo;
+  } else if (!shouldCheckCache) {
+    console.log(
+      `[downloadVideo] Skipping cache check to enforce format: ${formatId}`,
+    );
   }
 
   const outputTemplate = path.join(
     DOWNLOADS_DIR,
-    `${videoId}_download.%(ext)s`
+    `${videoId}_download.%(ext)s`,
   );
 
   return new Promise((resolve, reject) => {
@@ -428,7 +441,7 @@ async function downloadVideo(
           ...process.env,
           PATH: process.env.PATH || "",
         },
-      }
+      },
     );
 
     let downloadedFile = "";
@@ -470,7 +483,7 @@ async function downloadVideo(
         if (!downloadedFile) {
           const files = fs.readdirSync(DOWNLOADS_DIR);
           const foundFile = files.find((f: string) =>
-            f.startsWith(`${videoId}_download.`)
+            f.startsWith(`${videoId}_download.`),
           );
           if (foundFile) {
             downloadedFile = path.join(DOWNLOADS_DIR, foundFile);
@@ -501,7 +514,7 @@ async function clipVideo(
   inputFile: string, // Can be .webm, .mkv, .mp4, etc.
   startTime: string,
   endTime: string,
-  dryRun = false
+  dryRun = false,
 ): Promise<string> {
   updateJobStatus(jobId, "clipping", { progress: 50 });
 
@@ -519,7 +532,7 @@ async function clipVideo(
 
   const outputFile = path.join(
     CLIPS_DIR,
-    `${videoId}_clip_${startSafe}_to_${endSafe}${inputExt}`
+    `${videoId}_clip_${startSafe}_to_${endSafe}${inputExt}`,
   );
 
   // In dry run mode, simulate clipping
@@ -558,7 +571,7 @@ async function clipVideo(
     const durationMinutes = Math.floor((durationSeconds % 3600) / 60);
     const durationSecs = durationSeconds % 60;
     const duration = `${String(durationHours).padStart(2, "0")}:${String(
-      durationMinutes
+      durationMinutes,
     ).padStart(2, "0")}:${String(durationSecs).padStart(2, "0")}`;
 
     const spawnFn = dryRun ? mockSpawn : spawn;

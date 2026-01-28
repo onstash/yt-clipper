@@ -44,6 +44,7 @@ export function createJob(input: CreateJobInput): Job {
     url: input.url,
     startTime: input.start,
     endTime: input.end,
+    formatId: input.formatId,
     progress: 0,
     metadata: input.metadata,
     createdAt: Date.now(),
@@ -93,7 +94,7 @@ export function saveJob(job: Job): void {
 export function updateJobStatus(
   jobId: string,
   status: Job["status"],
-  updates?: Partial<Job>
+  updates?: Partial<Job>,
 ): Job | null {
   const job = getJob(jobId);
   if (!job) return null;
@@ -177,7 +178,7 @@ export function cleanupExpiredJobs(): void {
           const downloadPath = path.join(
             process.cwd(),
             "public",
-            job.downloadedFile
+            job.downloadedFile,
           );
           if (fs.existsSync(downloadPath)) {
             fs.unlinkSync(downloadPath);
