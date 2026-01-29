@@ -50,3 +50,5 @@ next-env.d.ts
 /public/downloads/
 /public/clips/
 src/transcript.json
+docs/
+prompts/
